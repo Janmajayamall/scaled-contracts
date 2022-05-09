@@ -3,6 +3,7 @@ pragma solidity ^0.8.10;
 
 import "./libraries/smt.sol";
 
+// Sketch of Optimisitic(SMT)
 contract Chain {
     struct Receipt {
         address a_address;
