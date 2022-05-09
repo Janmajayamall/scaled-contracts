@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.10;
 
-import "./libraries/smt.sol";
-
-contract Chain {
+contract State {
     struct Receipt {
         address a_address;
         address b_address;
