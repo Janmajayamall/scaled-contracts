@@ -161,7 +161,7 @@ contract State {
         }
 
         // apply the updates
-        // we reverse owed & owes to revert the effec or `wR`
+        // uwe reverse owed & owes to revert the effec or `wR`
         updateAccount(wR.aAddress, wR.aOwes, wR.bOwes);
         updateAccount(wR.bAddress, wR.bOwes, wR.aOwes);
 
