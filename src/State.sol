@@ -29,9 +29,7 @@ contract State {
             - "B" posts "C" receipt on chain ~ this reverses the state and updates it correctly
 
             on every account update -> extend withdrawam time to timestamp + 7 days??
-
-
-     */
+    */
 
     struct Account {
         uint128 balance;
@@ -54,6 +52,7 @@ contract State {
     }
 
     struct Record {
+        // Storing only first 160 bits of last receipt hash
         uint160 lastRHash;
         uint16 seqNo;
         uint32 fixedAfter;
@@ -61,27 +60,27 @@ contract State {
 
     mapping(address => Account) accounts;
     // H(A,B)
-    mapping(bytes32 => Record) history;
+    mapping(bytes32 => Record) records;
 
-    function receiptHash(Receipt memory receipt)
+    function receiptIdentifier(Receipt memory receipt)
         internal
-        view
-        returns (bytes32)
+        pure
+        returns (uint160)
     {
         return
-            keccak256(
+            uint160(uint256(keccak256(
                 abi.encodePacked(
                     receipt.aAddress,
                     receipt.bAddress,
                     receipt.aOwes,
                     receipt.bOwes
                 )
-            );
+            )));
     }
 
     function recordHash(address aAddress, address bAddress)
         internal
-        view
+        pure
         returns (bytes32)
     {
         return keccak256(abi.encodePacked(aAddress, bAddress));
@@ -89,8 +88,6 @@ contract State {
 
     function relay(Update[] memory updates) public {
         for (uint256 i = 0; i < updates.length; i++) {
-            bytes32 rHash = receiptHash(updates[i].receipt);
-
             // validate signatures
 
             // validate receipt
@@ -98,15 +95,15 @@ contract State {
                 updates[i].receipt.aAddress,
                 updates[i].receipt.bAddress
             );
-            Record memory record = history[
+            Record memory record = records[
                 recordHash(
                     updates[i].receipt.aAddress,
                     updates[i].receipt.bAddress
                 )
             ];
             if (
-                record.seqNo + uint16(1) != updates[i].seqNo ||
-                updates[i].expiresBy <= block.timestamp
+                record.seqNo + uint16(1) != updates[i].receipt.seqNo ||
+                updates[i].receipt.expiresBy <= block.timestamp
             ) {
                 revert();
             }
@@ -114,49 +111,40 @@ contract State {
             // receipt is valid
 
             // update record
-            record.lastRHash = rHash;
-            record.seqNo = updates[i].seqNo;
-            record.fixedAfter = block.timestamp + 7 days;
-            history[recordKey] = record;
+            record.lastRHash = receiptIdentifier(updates[i].receipt);
+            record.seqNo = updates[i].receipt.seqNo;
+            record.fixedAfter = uint32(block.timestamp + 7 days);
+            records[recordKey] = record;
 
             // update account objects
-            Account memory aAccount = accounts[updates[i].receipt.aAddress];
-            Account memory bAccount = accounts[updates[i].receipt.bAddress];
-
-            // TODO handle negative case
-            aAccount.balance += updates[i].receipt.bOwes;
-            if (aAccount.balance < updates[i].receipt.aOwes) {
-                // Ahhh...tried to cheat :P
-                // Probably slash
-                aAccount.balance = 0;
-            } else {
-                aAccount.balance -= updates[i].receipt.aOwes;
-            }
-            bAccount.balance += updates[i].receipt.aOwes;
-            if (bAccount.balance < updates[i].receipt.bOwes) {
-                // Ahhh...tried to cheat :P
-                // Probably slash
-                bAccount.balance = 0;
-            } else {
-                bAccount.balance -= updates[i].receipt.bOwes;
-            }
-            // buffer period = 7 days
-            aAccount.withdrawAfter = block.timestamp + 7 days;
-            bAccount.withdrawAfter = block.timestamp + 7 days;
-
-            accounts[updates[i].receipt.aAddress] = aAccount;
-            accounts[updates[i].receipt.bAddress] = bAccount;
+            updateAccount(updates[i].receipt.aAddress, updates[i].receipt.bOwes, updates[i].receipt.aOwes);
+            updateAccount(updates[i].receipt.bAddress, updates[i].receipt.aOwes, updates[i].receipt.bOwes);
         }
     }
 
+    function updateAccount(address uAddress, uint128 owed, uint128 owes) internal {
+        Account memory account = accounts[uAddress];
+        account.balance += owed;
+        if (account.balance < owes){
+            // TODO decrease 
+            account.balance = 0;
+        }else {
+            account.balance -= owes;
+        }
+        // buffer period = 7 days
+        account.withdrawAfter = uint32(block.timestamp + 7 days);
+        accounts[uAddress] = account;
+    }
+
+
     function correctUpdate(Receipt calldata wR, Receipt calldata cR) public {
         bytes32 recordKey = recordHash(
-            wR.receipt.aAddress,
-            cR.receipt.bAddress
+            wR.aAddress,
+            cR.bAddress
         );
 
         // rHash should match H(wR)
-        Record memory record = history[recordKey];
+        Record memory record = records[recordKey];
         if (record.fixedAfter <= block.timestamp) {
             // You can change after buffer period
             revert();
@@ -173,6 +161,13 @@ contract State {
         }
 
         // apply the updates
+        // we reverse owed & owes to revert the effec or `wR`
+        updateAccount(wR.aAddress, wR.aOwes, wR.bOwes);
+        updateAccount(wR.bAddress, wR.bOwes, wR.aOwes);
+
+        // apply cR
+        updateAccount(wR.aAddress, wR.bOwes, wR.aOwes);
+        updateAccount(wR.bAddress, wR.aOwes, wR.bOwes);
     }
 }
 
@@ -180,6 +175,7 @@ contract State {
 // 1. Once users move from `seq_no` to `seq_no + 1` ~ we assume that both users aggree that last `seq_no` receipt was settled properly.
 // 2. I don't think we should  *not allow*  users from calling `correctUpdate` after expiry - because dishonest user `A` can cheat
 //    by posting old receipt (but valid) right before timestamp expiry (we are assuming that receipts can change eveen after 1 sec).
-// 3. What we can do is this - You can call `correctUpdate` anytime withing `bufferPeriod`.
+// 3. What we can do is this - You can call `correctUpdate` anytime within `bufferPeriod`.
 // 4. Security deposit should be something significant. Plus, receipts with `a(b)Owes` >= 10% of a(b)SecurityDeposit should be considered
 //    risky.
+// 5. How about slashing user on deposit/withdrawal if their balance if negative
