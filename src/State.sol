@@ -115,7 +115,7 @@ contract State {
             );
     }
 
-    function ecdsaRecover(bytes32 msgHash, bytes calldata signature) internal view returns (address signer) {
+    function ecdsaRecover(bytes32 msgHash, bytes calldata signature) internal pure returns (address signer) {
         bytes32 r;
         bytes32 s;
         uint8 v;
@@ -372,26 +372,15 @@ contract State {
 
 
 // Things to keep in mind
-// 1. Once users move from `seq_no` to `seq_no + 1` ~ we assume that both users aggree that last `seq_no` receipt was settled properly.
-// 2. I don't think we should  *not allow*  users from calling `correctUpdate` after expiry - because dishonest user `A` can cheat
-//    by posting old receipt (but valid) right before timestamp expiry (we are assuming that receipts can change eveen after 1 sec).
-// 3. What we can do is this - You can call `correctUpdate` anytime within `bufferPeriod`.
-// 4. Security deposit should be something significant. Plus, receipts with `a(b)Owes` >= 10% of a(b)SecurityDeposit should be considered
-//    risky.
-// 5. How about slashing user on deposit/withdrawal if their balance if negative
+// 1. Once users move from `seq_no` to `seq_no + 1` ~ we assume that both users aggre that last `seq_no` receipt was settled properly.
+// 2. We have a buffer period after account states have been updated (rn it is set to 7 days), before which affected accounts cannot
+//    `withdraw`. This is done so to allow for anyone to correct the update using `correctUpdate` (if we omit buffer period, then dishonest
+//    user will post "not latest receipt" in updates and immediately withdraw their money, so that honest user would not have any chance of correcting
+//    the update)
+// 3. When acceipting a receipt `b` should make sure that `a` has enough balance & security deposit relative to the `amount`.
+// 4. We penalise users only on their security deposit, not from their account balance. This is done because security deposits are indicative 
+//    of how likely a user is to cheat and should be used as an heuritic when accepting payments (i.e. low security deposit relative to amount should
+//    be rejected).
 
-// How do you make sure that all accounts are fully collatorialised
-// How about rejecting receipts
-
-// 1. Don't take payments that are more than the balance
-// 2. If you submit an update you will only get upto +ve balance + security deposit back
-
-// So the user should keep the following in mind
-// 1. Never accept receipt that exceeds the balance
-// 2. 
-
-// Reasons for have strong opnion of transaction type (i.e. A is payer, B is receiver ~ not having bidirectional payment)
-// 1. Supports applications that we imagine this will enable
-// 2. Strengthens security and reduces complexity of state (correction) updates. For example - (1) If we have bidirectional payments
-// in which owed amounts can increase/decrease in subsequent updates, then handling correction for invalid updates is hard since to correct
-// you will have to subtract balances which can result in negative balances.  
+// Still thinking
+// 1. Should penalisation be proportional to `receipt.amount` or constant?
