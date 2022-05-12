@@ -64,11 +64,13 @@ contract State {
     uint32 constant bufferPeriod = uint32(7 days);
     address immutable token;
 
+    uint256 reserves;
+
+    uint256 constant ECDSA_SIGNATURE_LENGTH = 65;
+
     constructor(address _token) {
         token = _token;
     }
-
-    uint256 reserves;
 
     function getBalance(address user) internal view returns(uint256) {
         (bool success, bytes memory data) = token.staticcall(abi.encodeWithSelector(IERC20.balanceOf.selector, user));
@@ -79,7 +81,7 @@ contract State {
         return abi.decode(data, (uint256));
     }
 
-    function receiptIdentifier(Receipt memory receipt)
+    function receiptIdentifier(Receipt calldata receipt)
         internal
         pure
         returns (uint160)
@@ -96,6 +98,50 @@ contract State {
             )));
     }
 
+    function receiptHash(Receipt calldata receipt)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return
+            keccak256(
+                abi.encodePacked(
+                    receipt.aAddress,
+                    receipt.bAddress,
+                    receipt.seqNo,
+                    receipt.amount,
+                    receipt.expiresBy
+                )
+            );
+    }
+
+    function ecdsaRecover(bytes32 msgHash, bytes calldata signature) internal view returns (address signer) {
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+
+        if (signature.length != ECDSA_SIGNATURE_LENGTH) {
+            // Malformed ecdsa signature
+            revert();
+        }
+
+        assembly {
+            // r = encodedSignature[0:32]
+            r := calldataload(signature.offset)
+            // s = encodedSignature[32:64]
+            s := calldataload(add(signature.offset, 32))
+            // v = uint8(encodedSignature[64:64])
+            v := shr(248, calldataload(add(signature.offset, 64)))
+        }
+
+        signer = ecrecover(msgHash, v, r, s);
+
+        if (signer == address(0)) {
+            // Invalid ecdsa signature
+            revert();
+        }
+    }
+
     function recordKey(address aAddress, address bAddress)
         internal
         pure
@@ -103,6 +149,7 @@ contract State {
     {
         return keccak256(abi.encodePacked(aAddress, bAddress));
     }
+
 
     function depositSecurity(address to) external {   
         // get amount deposited
@@ -190,9 +237,17 @@ contract State {
         // emit event
     }
 
-    function post(Update[] memory updates) public {
+    function post(Update[] calldata updates) public {
         for (uint256 i = 0; i < updates.length; i++) {
             // validate signatures
+            bytes32 rHash = receiptHash(updates[i].receipt);
+            if (
+                updates[i].receipt.aAddress != ecdsaRecover(rHash, updates[i].aSignature) ||
+                updates[i].receipt.bAddress != ecdsaRecover(rHash, updates[i].bSignature)  
+            ) {
+                // Invalid signature
+                revert();
+            }
 
             // validate receipt
             bytes32 rKey = recordKey(
@@ -232,6 +287,7 @@ contract State {
             accounts[updates[i].receipt.bAddress] = bAccount;
 
             // update record
+            // FIXME we're recalculating `receipt` hash here
             record.lastRIdentifier = receiptIdentifier(updates[i].receipt);
             record.seqNo = updates[i].receipt.seqNo;
             record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
@@ -239,7 +295,18 @@ contract State {
         }
     }
 
-    function correctUpdate(Receipt calldata wR, Receipt calldata cR) public {
+    function correctUpdate(Receipt calldata wR, Update calldata cUpdate) public {
+        // validate `cUpdate` signatures
+        bytes32 rHash = receiptHash(cUpdate.receipt);
+        if (
+            cUpdate.receipt.aAddress != ecdsaRecover(rHash, cUpdate.aSignature) ||
+            cUpdate.receipt.bAddress != ecdsaRecover(rHash, cUpdate.bSignature)  
+        ) {
+            // Invalid signature
+            revert();
+        }
+
+        Receipt calldata cR = cUpdate.receipt;
 
         // latest update record
         bytes32 rKey = recordKey(
