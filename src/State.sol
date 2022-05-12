@@ -3,6 +3,7 @@ pragma solidity 0.8.13;
 
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
+import "./test/Console.sol";
 
 contract State {
   
@@ -72,7 +73,11 @@ contract State {
         token = _token;
     }
 
-    function getBalance(address user) internal view returns(uint256) {
+    function getAccount(address _of) public view returns (Account memory a){
+        a = accounts[_of];
+    }
+
+    function getTokenBalance(address user) internal view returns(uint256) {
         (bool success, bytes memory data) = token.staticcall(abi.encodeWithSelector(IERC20.balanceOf.selector, user));
         if (!success || data.length != 32){
             // revert with balance error
@@ -153,7 +158,7 @@ contract State {
 
     function depositSecurity(address to) external {   
         // get amount deposited
-        uint256 balance = getBalance(address(this));
+        uint256 balance = getTokenBalance(address(this));
         uint256 amount = balance - reserves;
         reserves = balance;
 
@@ -176,7 +181,7 @@ contract State {
 
     function fundAccount(address to) external {
         // get amount deposited
-        uint256 balance = getBalance(address(this));
+        uint256 balance = getTokenBalance(address(this));
         uint256 amount = balance - reserves;
         reserves = balance;
 
@@ -239,6 +244,8 @@ contract State {
 
     function post(Update[] calldata updates) public {
         for (uint256 i = 0; i < updates.length; i++) {
+            console.log("Processing at index ", i);
+
             // validate signatures
             bytes32 rHash = receiptHash(updates[i].receipt);
             if (
@@ -260,7 +267,7 @@ contract State {
 
             if (
                 // update receipt should be next receipt 
-                record.seqNo + uint16(1) != updates[i].receipt.seqNo ||
+                // record.seqNo + uint16(1) != updates[i].receipt.seqNo ||
                 updates[i].receipt.expiresBy <= block.timestamp
             ) {
                 revert();
@@ -272,7 +279,7 @@ contract State {
             Account memory aAccount = accounts[updates[i].receipt.aAddress];
             uint128 amount = updates[i].receipt.amount;
             bool slashed;
-            if (amount < aAccount.balance){
+            if (aAccount.balance < amount){
                 // slashing of A
                 amount = aAccount.balance;
                 aAccount.balance = 0;
@@ -281,6 +288,8 @@ contract State {
                 aAccount.balance -= amount;
             }
             Account memory bAccount = accounts[updates[i].receipt.bAddress];
+            bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
+            bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
             bAccount.balance += amount;
             
             accounts[updates[i].receipt.aAddress] = aAccount;
