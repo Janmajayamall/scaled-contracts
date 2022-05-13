@@ -145,5 +145,15 @@ contract ContractTest is DSTest {
         printBalances();
     }
 
-
+    function testStateL2() public {
+        State.Receipt memory rB = createReceipt(aAddress, bAddress, 0, 1);
+        State.Update memory uB = offChainTransferUpdate(5 * 10 ** 18, rB, false, aPvKey, bPvKey);
+        State.Receipt memory r = uB.receipt;
+        console.logBytes(uB.aSignature);
+        console.logBytes(uB.bSignature);
+        bytes memory trial = abi.encodePacked(uint64(931), uint16(1), uint64(121), uint128(2121), uint32(2121), uB.aSignature, uB.bSignature);
+        console.logBytes(trial);
+        (bool success, ) = address(stateL2).call(abi.encodePacked(bytes4(keccak256("post()")), trial));
+        assert(success == true);
+    }
 }

@@ -60,7 +60,7 @@ contract State {
     /// Security deposit by users
     mapping(address => uint256) securityDeposits;
 
-    // slashing amount is just 1ETH right now
+    // slashing amount is just 1 Unit right now
     uint256 constant slashValue = 1e18;
     uint32 constant bufferPeriod = uint32(7 days);
     address immutable token;
@@ -268,7 +268,7 @@ contract State {
 
             if (
                 // update receipt should be next receipt 
-                // record.seqNo + uint16(1) != updates[i].receipt.seqNo ||
+                record.seqNo + uint16(1) != updates[i].receipt.seqNo ||
                 updates[i].receipt.expiresBy <= block.timestamp
             ) {
                 revert();
