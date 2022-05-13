@@ -9,7 +9,6 @@ contract StateL2 {
     struct PartialReceipt {
         uint64 bIndex;
         uint128 amount;
-        uint32 expiresBy;
         bytes aSignature;
         bytes bSignature;
     }
@@ -30,6 +29,8 @@ contract StateL2 {
         uint32 fixedAfter;
         // Flag of whether `a` was slashed for overspending
         bool slashed;
+        // update expiresBy
+        uint32 expiresBy;
     }
 
     mapping(uint64 => address) public addresses;
@@ -50,8 +51,16 @@ contract StateL2 {
 
     uint256 constant ECDSA_SIGNATURE_LENGTH = 65;
 
+    // duration is a week in seconds
+    uint32 constant duration = 604800;
+
     constructor(address _token) {
         token = _token;
+    }
+
+    function currentCycleExpiry() internal view returns (uint32) {
+        // `expiredBy` value of a `receipt = roundUp(block.timestamp / duration) * duration`
+        return uint32(((block.timestamp / duration) + 1) * duration);
     }
 
     function recordKey(address aAddress, address bAddress)
@@ -89,8 +98,6 @@ contract StateL2 {
         uint64 bIndex;
         // 16 bytes
         uint128 amount;
-        // 4 bytes
-        uint32 expiresBy;
         // 65 bytes
         bytes memory aSignature = new bytes(65);
         // 65 bytes
@@ -103,12 +110,8 @@ contract StateL2 {
             offset := add(offset, 8)
             amount := shr(128, calldataload(offset))
 
-            // expiresBy 
-            offset := add(offset, 16)
-            expiresBy := shr(224, calldataload(offset))
-
             // aSignature
-            offset := add(offset, 4)
+            offset := add(offset, 16)
             mstore(add(aSignature,32), calldataload(offset))
             offset := add(offset, 32)
             mstore(add(aSignature,64), calldataload(offset))
@@ -128,7 +131,6 @@ contract StateL2 {
         r = PartialReceipt({
             bIndex: bIndex,
             amount: amount,
-            expiresBy: expiresBy,
             aSignature: aSignature,
             bSignature: bSignature
         });
@@ -139,7 +141,7 @@ contract StateL2 {
         address bAddress,
         uint128 amount,
         uint16 seqNo,
-        uint32 expiresBy
+        uint256 expiresBy
     ) internal pure returns (bytes32){
         return keccak256(
             abi.encodePacked(
@@ -197,6 +199,8 @@ contract StateL2 {
             revert();
         }
 
+        uint32 expiresBy = currentCycleExpiry();
+
         for (uint256 i = 0; i < count; i++) {
             PartialReceipt memory pR = getUpdateAtIndex(i);
             // console.logBytes(pR.aSignature);
@@ -217,13 +221,13 @@ contract StateL2 {
             record.seqNo += 1;
             record.amount = pR.amount;
             record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
+            record.expiresBy = expiresBy;
 
             // validate signatures & expiresBy
-            bytes32 rHash = receiptHash(aAddress, bAddress, pR.amount, record.seqNo, pR.expiresBy);
+            bytes32 rHash = receiptHash(aAddress, bAddress, pR.amount, record.seqNo, expiresBy);
             if (
                 ecdsaRecover(rHash, pR.aSignature) != aAddress ||
-                ecdsaRecover(rHash, pR.bSignature) != bAddress ||
-                pR.expiresBy <= block.timestamp
+                ecdsaRecover(rHash, pR.bSignature) != bAddress
             ) {
                 revert();
             }
@@ -263,6 +267,7 @@ contract StateL2 {
         uint64 aIndex;
         uint64 bIndex;
         uint128 newAmount;
+        uint32 expiresBy;
         bytes memory aSignature = new bytes(65);
         bytes memory bSignature = new bytes(65);
 
@@ -274,6 +279,8 @@ contract StateL2 {
             offset := add(offset, 8)
             newAmount := shr(128, calldataload(offset))
             offset := add(offset, 16)
+            expiresBy := shr(224, calldataload(offset))
+            offset := add(offset, 4)
             
             // aSignature
             mstore(add(aSignature,32), calldataload(offset))
@@ -297,14 +304,18 @@ contract StateL2 {
         bytes32 rKey = recordKey(aAddress, bAddress);
         Record memory record = records[rKey];
 
-        // validate signatures
+        // validate signatures & receipt
         // TODO: remove expiresBy
-        bytes32 rHash = receiptHash(aAddress, bAddress, newAmount, record.seqNo, 0);
+        bytes32 rHash = receiptHash(aAddress, bAddress, newAmount, record.seqNo, expiresBy);
         if (
             ecdsaRecover(rHash, aSignature) != aAddress ||
             ecdsaRecover(rHash, bSignature) != bAddress ||
             // amount of latest `receipt` is always greater
             record.amount >= newAmount || 
+            // `expiresBy` should be a multiple `duration`
+            expiresBy % duration == 0 || 
+            // `expiresBy` should be greater than `record.expiresBy`
+            expiresBy <= record.expiresBy ||
             // cannot correct update after `fixedPeriod`
             record.fixedAfter <= block.timestamp
         ){
@@ -345,6 +356,7 @@ contract StateL2 {
         record.slashed = record.slashed || slashed;
         record.amount = newAmount;
         record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
+        record.expiresBy = expiresBy;
         records[rKey] = record;
     }
 }
