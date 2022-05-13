@@ -242,9 +242,10 @@ contract State {
         // emit event
     }
 
+
     function post(Update[] calldata updates) public {
         for (uint256 i = 0; i < updates.length; i++) {
-            console.log("Processing at index ", i);
+            console.log("Processing receipt at index ", i);
 
             // validate signatures
             bytes32 rHash = receiptHash(updates[i].receipt);

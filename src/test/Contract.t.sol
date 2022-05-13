@@ -3,12 +3,14 @@ pragma solidity 0.8.13;
 
 import "ds-test/test.sol";
 import "./../State.sol";
+import "./../StateL2.sol";
 import "./TestToken.sol";
 import "./Vm.sol";
 import "./Console.sol";
 
 contract ContractTest is DSTest {
     State state;
+    StateL2 stateL2;
     TestToken token;
     Vm vm;
 
@@ -33,10 +35,10 @@ contract ContractTest is DSTest {
         cAddress = vm.addr(cPvKey);
         dAddress = vm.addr(dPvKey); 
 
-        console.log(aAddress, "aAddress");
-        console.log(bAddress, "bAddress");
-        console.log(cAddress, "cAddress");
-        console.log(dAddress, "dAddress");
+        // console.log(aAddress, "aAddress");
+        // console.log(bAddress, "bAddress");
+        // console.log(cAddress, "cAddress");
+        // console.log(dAddress, "dAddress");
 
         token = new TestToken(
             "TestToken",
@@ -47,6 +49,7 @@ contract ContractTest is DSTest {
         // mint tokens to `this`
         token.mint(address(this), type(uint256).max);
         state = new State(address(token));
+        stateL2 = new StateL2();
     }
 
     function createReceipt(address a, address b, uint128 amount, uint16 seqNo) internal view returns (State.Receipt memory r) {
@@ -85,6 +88,7 @@ contract ContractTest is DSTest {
             );
     }
 
+
     function offChainTransferUpdate(uint128 incAmount, State.Receipt memory prevReceipt, bool incSeqNo, uint256 aPv, uint256 bPv) internal returns (State.Update memory update) {
         prevReceipt.amount += incAmount;
         prevReceipt.expiresBy = uint32(block.timestamp) + expiresBy;
@@ -113,7 +117,7 @@ contract ContractTest is DSTest {
         console.log("D balance", state.getAccount(dAddress).balance);
     }
 
-    function testExample() public {
+    function tes_tExample() public {
         console.log("Balances Before");
         printBalances();
 
@@ -140,4 +144,6 @@ contract ContractTest is DSTest {
         console.log("Balances Before");
         printBalances();
     }
+
+
 }
