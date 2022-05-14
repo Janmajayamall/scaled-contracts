@@ -2,6 +2,7 @@
 pragma solidity 0.8.13;
 
 import "./interfaces/IERC20.sol";
+import "./libraries/Transfers.sol";
 import "./test/Console.sol";
 
 // Optimizes heavily to reduce calldata
@@ -71,7 +72,7 @@ contract StateL2 {
         return keccak256(abi.encodePacked(aAddress, bAddress));
     }
 
-    function register(address user) public {
+    function register(address user) external {
         if (addressesReverse[user] != 0) {
             // already registered
             revert();
@@ -82,6 +83,112 @@ contract StateL2 {
         addresses[c] = user;
         addressesReverse[user] = c;
         userCount = c;
+    }
+
+    function depositSecurity(uint64 toIndex) external {
+        // get amount deposited
+        uint256 balance = getTokenBalance(address(this));
+        uint256 amount = balance - reserves;
+        reserves = balance;
+
+        address to = addresses[toIndex];
+        if (to == address(0)) {
+            // user not registered
+            revert();
+        }
+
+        uint256 totalDeposit = securityDeposits[to] + amount;
+        
+        // slash from `totalDeposit` if any
+        uint256 slash = slashAmounts[to];
+        if (slash != 0) {
+            if (slash > totalDeposit){
+                totalDeposit = 0;
+                slash -= totalDeposit;
+            }else {
+                totalDeposit -= slash;
+                slash = 0;
+            }
+            slashAmounts[to] = slash;
+        }
+        securityDeposits[to] = totalDeposit;
+    }
+
+
+    function fundAccount(uint64 toIndex) external {
+        // get amount deposited
+        uint256 balance = getTokenBalance(address(this));
+        uint256 amount = balance - reserves;
+        reserves = balance;
+
+        address to = addresses[toIndex];
+        if (to == address(0)) {
+            // user not registered
+            revert();
+        }
+
+        // check whether we need to slash the user
+        // Note that we don't slash from the account 
+        // balance.
+        uint256 slash = slashAmounts[to];
+        if (slash != 0){
+            uint256 securityDeposit = securityDeposits[to];
+            if (slash > securityDeposit) {
+                securityDeposit = 0;
+                slash -= securityDeposit;
+            }else {
+                securityDeposit -= slash;
+                slash = 0;
+            }
+            slashAmounts[to] = slash;
+            securityDeposits[to] = securityDeposit;
+        }
+        
+        Account memory account = accounts[to];
+        account.balance += uint128(amount);
+        accounts[to] = account;
+
+        // emit event
+    }
+
+
+    function withdraw(uint64 toIndex, uint128 amount) external {
+        address to = addresses[toIndex];
+        if (to == address(0)) {
+            // user not registered
+            revert();
+        }
+
+        Account memory account = accounts[to];
+
+        // check whether user's account isn't in
+        // buffer period
+        if (account.withdrawAfter >= block.timestamp) {
+            revert();
+        }
+
+        // check slashing
+        uint256 slash = slashAmounts[to];
+        if (slash != 0){
+            uint256 securityDeposit = securityDeposits[to];
+            if (slash > securityDeposit){
+                securityDeposit = 0;
+                slash -= securityDeposit;
+            }else {
+                slash = 0;
+                securityDeposit -= slash;
+            }
+            securityDeposits[to] = securityDeposit;
+            slashAmounts[to] = slash;
+        }
+
+        account.balance -= amount;
+        accounts[to] = account;
+
+        Transfers.safeTransfer(IERC20(token), to, amount);
+        reserves -= amount;
+
+        // emit event
     }
 
     function getTokenBalance(address user) internal view returns(uint256) {
@@ -223,7 +330,8 @@ contract StateL2 {
             record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
             record.expiresBy = expiresBy;
 
-            // validate signatures & expiresBy
+            // validate signatures
+            // Note since `expiresBy` is derived on-chain we don't need to check it
             bytes32 rHash = receiptHash(aAddress, bAddress, pR.amount, record.seqNo, expiresBy);
             if (
                 ecdsaRecover(rHash, pR.aSignature) != aAddress ||
@@ -351,7 +459,6 @@ contract StateL2 {
         if (!record.slashed && slashed){
             slashAmounts[aAddress] += slashValue;
         }
-
 
         record.slashed = record.slashed || slashed;
         record.amount = newAmount;
