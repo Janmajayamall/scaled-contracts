@@ -36,9 +36,9 @@ contract StateL2 {
     }
 
     mapping(uint64 => address) public addresses;
-    mapping(address => uint64) public addressesReverse;
+    mapping(address => uint64) public usersIndex;
 
-    mapping(address => Account) accounts;
+    mapping(address => Account) public accounts;
     mapping(bytes32 => Record) public records;
     mapping(address => uint256) public slashAmounts;
     mapping(address => uint256) public securityDeposits;
@@ -78,7 +78,7 @@ contract StateL2 {
     }
 
     function register(address user) external {
-        if (addressesReverse[user] != 0) {
+        if (usersIndex[user] != 0) {
             // already registered
             revert();
         }
@@ -86,8 +86,10 @@ contract StateL2 {
         uint64 c = userCount;
         c += 1;
         addresses[c] = user;
-        addressesReverse[user] = c;
+        usersIndex[user] = c;
         userCount = c;
+
+        // console.log("registered:", user);
     }
 
     function depositSecurity(uint64 toIndex) external {
@@ -215,7 +217,7 @@ contract StateL2 {
         // 65 bytes
         bytes memory bSignature = new bytes(65);
 
-        uint256 offset = 14 + (i * 158);
+        uint256 offset = 14 + (i * 154);
         assembly {
             bIndex := shr(192, calldataload(offset))
 
@@ -237,7 +239,6 @@ contract StateL2 {
             mstore(add(bSignature,64), calldataload(offset))
             offset := add(offset, 32)
             mstore(add(bSignature,96), calldataload(offset))
-
         }
 
         r = PartialReceipt({
@@ -247,6 +248,13 @@ contract StateL2 {
             bSignature: bSignature
         });
 
+        // console.log("---------------");
+        // console.log("Gen Update");
+        // console.log("bIndex", r.bIndex);
+        // console.log("amount", amount);
+        // console.logBytes(r.aSignature);
+        // console.logBytes(r.bSignature);
+        // console.log("---------------");
     }
 
     function receiptHash(
@@ -318,8 +326,8 @@ contract StateL2 {
             count := shr(240, calldataload(add(4, 8)))
         }
 
-        // console.log(aIndex, " aIndex");
-        // console.log(count, " count");
+        // console.log("aIndex", aIndex);
+        // console.log("count", count);
         
         // a should have registered
         address aAddress = addresses[aIndex];
@@ -327,21 +335,21 @@ contract StateL2 {
             revert();
         }
 
-        // console.log(aAddress, "aAddress");
+        // console.log("aAddress", aAddress);
 
         uint32 expiresBy = currentCycleExpiry();
 
         for (uint256 i = 0; i < count; i++) {
+            // console.log("*********************");
+            // console.log("Processing index ", i);
             PartialReceipt memory pR = getUpdateAtIndex(i);
-            // console.logBytes(pR.aSignature);
-            // console.logBytes(pR.bSignature);
 
             address bAddress = addresses[pR.bIndex];
             if (bAddress == address(0)){
                 revert();
             }
 
-            // console.log(bAddress, "bAddress");
+            // console.log("bAddress", bAddress);
 
             bytes32 rKey = recordKey(
                 aAddress,
@@ -391,6 +399,8 @@ contract StateL2 {
 
             // store updated record    
             records[rKey] = record;
+
+            // console.log("*********************");
         }   
 
         // emit event     
