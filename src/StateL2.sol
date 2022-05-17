@@ -5,8 +5,9 @@ import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
 import "./test/Console.sol";
 
-// Optimizes heavily to reduce calldata
+/// Optimizes heavily to reduce calldata
 contract StateL2 {
+    
     struct PartialReceipt {
         uint64 bIndex;
         uint128 amount;
@@ -59,7 +60,7 @@ contract StateL2 {
         token = _token;
     }
 
-    function currentCycleExpiry() internal view returns (uint32) {
+    function currentCycleExpiry() public view returns (uint32) {
         // `expiredBy` value of a `receipt = roundUp(block.timestamp / duration) * duration`
         return uint32(((block.timestamp / duration) + 1) * duration);
     }
@@ -70,6 +71,10 @@ contract StateL2 {
         returns (bytes32)
     {
         return keccak256(abi.encodePacked(aAddress, bAddress));
+    }
+
+    function getAccount(address _of) public view returns (Account memory a){
+        a = accounts[_of];
     }
 
     function register(address user) external {
@@ -200,7 +205,7 @@ contract StateL2 {
         return abi.decode(data, (uint256));
     }
 
-    function getUpdateAtIndex(uint256 i) internal pure returns (PartialReceipt memory r){
+    function getUpdateAtIndex(uint256 i) internal view returns (PartialReceipt memory r){
         // 8 bytes
         uint64 bIndex;
         // 16 bytes
@@ -241,6 +246,7 @@ contract StateL2 {
             aSignature: aSignature,
             bSignature: bSignature
         });
+
     }
 
     function receiptHash(
@@ -248,8 +254,8 @@ contract StateL2 {
         address bAddress,
         uint128 amount,
         uint16 seqNo,
-        uint256 expiresBy
-    ) internal pure returns (bytes32){
+        uint32 expiresBy
+    ) internal view returns (bytes32){
         return keccak256(
             abi.encodePacked(
                 aAddress,
@@ -261,7 +267,7 @@ contract StateL2 {
         );
     }
 
-    function ecdsaRecover(bytes32 msgHash, bytes memory signature) internal pure returns (address signer) {
+    function ecdsaRecover(bytes32 msgHash, bytes memory signature) internal view returns (address signer) {
         bytes32 r;
         bytes32 s;
         uint8 v;
@@ -272,7 +278,7 @@ contract StateL2 {
         }
 
         assembly {
-            let offset := 32
+            let offset := add(signature,32)
             // r = encodedSignature[0:32]
             r := mload(offset)
             // s = encodedSignature[32:64]
@@ -283,14 +289,26 @@ contract StateL2 {
             v := shr(248, mload(offset))
         }
 
-        signer = ecrecover(msgHash, v, r, s);
 
+        signer = ecrecover(msgHash, v, r, s);
         if (signer == address(0)) {
             // Invalid ecdsa signature
             revert();
         }
     }
     
+    // calldata in sequence:
+    // {
+    //     bytes4(keccack256(post()))
+    //     aIndex (8 bytes)
+    //     count (2 bytes)
+    //     updates[]: each {
+    //         bIndex (8 bytes)
+    //         amount (128 bytes)
+    //         aSignature (65 bytes)
+    //         bSignature (65 bytes)
+    //     }
+    // }
     function post() external {
         uint64 aIndex;
         uint16 count;
@@ -299,12 +317,17 @@ contract StateL2 {
             aIndex := shr(192, calldataload(4))
             count := shr(240, calldataload(add(4, 8)))
         }
+
+        // console.log(aIndex, " aIndex");
+        // console.log(count, " count");
         
         // a should have registered
         address aAddress = addresses[aIndex];
         if (aAddress == address(0)) {
             revert();
         }
+
+        // console.log(aAddress, "aAddress");
 
         uint32 expiresBy = currentCycleExpiry();
 
@@ -317,6 +340,8 @@ contract StateL2 {
             if (bAddress == address(0)){
                 revert();
             }
+
+            // console.log(bAddress, "bAddress");
 
             bytes32 rKey = recordKey(
                 aAddress,
@@ -413,7 +438,6 @@ contract StateL2 {
         Record memory record = records[rKey];
 
         // validate signatures & receipt
-        // TODO: remove expiresBy
         bytes32 rHash = receiptHash(aAddress, bAddress, newAmount, record.seqNo, expiresBy);
         if (
             ecdsaRecover(rHash, aSignature) != aAddress ||

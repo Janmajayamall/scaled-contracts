@@ -49,25 +49,25 @@ contract ContractTest is DSTest {
         // mint tokens to `this`
         token.mint(address(this), type(uint256).max);
         state = new State(address(token));
-        stateL2 = new StateL2();
+        stateL2 = new StateL2(address(token));
     }
 
-    function createReceipt(address a, address b, uint128 amount, uint16 seqNo) internal view returns (State.Receipt memory r) {
-        r = State.Receipt({
-            aAddress: a,
-            bAddress: b,
-            amount: amount,
-            seqNo: seqNo,
-            expiresBy: uint32(block.timestamp) + expiresBy
-        });
-    }
+    // function createReceipt(address a, address b, uint128 amount, uint16 seqNo) internal view returns (State.Receipt memory r) {
+    //     r = State.Receipt({
+    //         aAddress: a,
+    //         bAddress: b,
+    //         amount: amount,
+    //         seqNo: seqNo,
+    //         expiresBy: uint32(block.timestamp) + expiresBy
+    //     });
+    // }
 
-    function fundAccount(address to, uint256 amount) internal {
+    function fundAccount(uint64 index, uint256 amount) internal {
         // transfer token to `state`
-        token.transfer(address(state), amount);
+        token.transfer(address(stateL2), amount);
         
         // fund `to`'s account in `state`
-        state.fundAccount(to);
+        stateL2.fundAccount(index);
     }
 
     function signMsg(bytes32 msgHash, uint256 pvKey) internal returns (bytes memory signature){
@@ -75,85 +75,121 @@ contract ContractTest is DSTest {
         signature = abi.encodePacked(r, s, v);
     }
 
-    function receiptHash(State.Receipt memory receipt) internal pure returns (bytes32) {
+    function receiptHash(address a, address b, uint128 amount, uint32 _expiresBy, uint16 seqNo) internal view returns (bytes32) {
         return
             keccak256(
                 abi.encodePacked(
-                    receipt.aAddress,
-                    receipt.bAddress,
-                    receipt.seqNo,
-                    receipt.amount,
-                    receipt.expiresBy
+                    a,
+                    b,
+                    amount,
+                    seqNo,
+                    _expiresBy
                 )
             );
     }
 
 
-    function offChainTransferUpdate(uint128 incAmount, State.Receipt memory prevReceipt, bool incSeqNo, uint256 aPv, uint256 bPv) internal returns (State.Update memory update) {
-        prevReceipt.amount += incAmount;
-        prevReceipt.expiresBy = uint32(block.timestamp) + expiresBy;
+    // function offChainTransferUpdate(uint128 incAmount, State.Receipt memory prevReceipt, bool incSeqNo, uint256 aPv, uint256 bPv) internal returns (State.Update memory update) {
+    //     prevReceipt.amount += incAmount;
+    //     prevReceipt.expiresBy = uint32(block.timestamp) + expiresBy;
 
-        if (incSeqNo){
-            prevReceipt.seqNo += 1;
-        }
+    //     if (incSeqNo){
+    //         prevReceipt.seqNo += 1;
+    //     }
 
-        bytes32 rHash = receiptHash(prevReceipt);
+    //     bytes32 rHash = receiptHash(prevReceipt);
 
-        // sign the hash
-        bytes memory aSignature = signMsg(rHash, aPv);
-        bytes memory bSignature = signMsg(rHash, bPv);
+    //     // sign the hash
+    //     bytes memory aSignature = signMsg(rHash, aPv);
+    //     bytes memory bSignature = signMsg(rHash, bPv);
 
-        update = State.Update({
-            receipt: prevReceipt,
-            aSignature: aSignature,
-            bSignature: bSignature
-        });
-    }
+    //     update = State.Update({
+    //         receipt: prevReceipt,
+    //         aSignature: aSignature,
+    //         bSignature: bSignature
+    //     });
+    // }
 
-    function printBalances() internal view {
+    function printBalancesState() internal view {
         console.log("A balance", state.getAccount(aAddress).balance);
         console.log("B balance", state.getAccount(bAddress).balance);
         console.log("C balance", state.getAccount(cAddress).balance);
         console.log("D balance", state.getAccount(dAddress).balance);
     }
 
-    function tes_tExample() public {
-        console.log("Balances Before");
-        printBalances();
-
-        // A is the service provider to B, C, D
-        fundAccount(aAddress, 50 * 10 ** 18);
-        
-        // intial receipt
-        State.Receipt memory rB = createReceipt(aAddress, bAddress, 0, 1);
-        State.Receipt memory rC = createReceipt(aAddress, cAddress, 0, 1);
-        State.Receipt memory rD = createReceipt(aAddress, dAddress, 0, 1);
-
-        State.Update memory uB = offChainTransferUpdate(5 * 10 ** 18, rB, false, aPvKey, bPvKey);
-        State.Update memory uC = offChainTransferUpdate(7 * 10 ** 18, rC, false, aPvKey, cPvKey);
-        State.Update memory uD = offChainTransferUpdate(8 * 10 ** 18, rD, false, aPvKey, dPvKey);
-
-        State.Update[] memory updates = new State.Update[](2);
-        updates[0] = uB;
-        updates[1] = uC;
-        // updates[2] = uD;
-
-        state.post(updates);
-        console.log("State was updated");
-
-        console.log("Balances Before");
-        printBalances();
+    function printBalancesStateL2() internal view {
+        console.log("A balance", stateL2.getAccount(aAddress).balance);
+        console.log("B balance", stateL2.getAccount(bAddress).balance);
+        // console.log("C balance", stateL2.getAccount(cAddress).balance);
+        // console.log("D balance", stateL2.getAccount(dAddress).balance);
     }
 
+    // function tes_tExample() public {
+    //     console.log("Balances Before");
+    //     printBalancesState();
+
+    //     // A is the service provider to B, C, D
+    //     fundAccount(aAddress, 50 * 10 ** 18);
+        
+    //     // intial receipt
+    //     State.Receipt memory rB = createReceipt(aAddress, bAddress, 0, 1);
+    //     State.Receipt memory rC = createReceipt(aAddress, cAddress, 0, 1);
+    //     State.Receipt memory rD = createReceipt(aAddress, dAddress, 0, 1);
+
+    //     State.Update memory uB = offChainTransferUpdate(5 * 10 ** 18, rB, false, aPvKey, bPvKey);
+    //     State.Update memory uC = offChainTransferUpdate(7 * 10 ** 18, rC, false, aPvKey, cPvKey);
+    //     State.Update memory uD = offChainTransferUpdate(8 * 10 ** 18, rD, false, aPvKey, dPvKey);
+
+    //     State.Update[] memory updates = new State.Update[](2);
+    //     updates[0] = uB;
+    //     updates[1] = uC;
+    //     // updates[2] = uD;
+
+    //     state.post(updates);
+    //     console.log("State was updated");
+
+    //     console.log("Balances Before");
+    //     printBalancesState();
+    // }
+
     function testStateL2() public {
-        State.Receipt memory rB = createReceipt(aAddress, bAddress, 0, 1);
-        State.Update memory uB = offChainTransferUpdate(5 * 10 ** 18, rB, false, aPvKey, bPvKey);
-        State.Receipt memory r = uB.receipt;
-        console.logBytes(uB.aSignature);
-        console.logBytes(uB.bSignature);
-        bytes memory trial = abi.encodePacked(uint64(931), uint16(1), uint64(121), uint128(2121), uint32(2121), uB.aSignature, uB.bSignature);
-        console.logBytes(trial);
-        (bool success, ) = address(stateL2).call(abi.encodePacked(bytes4(keccak256("post()")), trial));
-        assert(success == true);
+        // vm.warp(5);
+
+        // register users
+        stateL2.register(aAddress);        
+        stateL2.register(bAddress);        
+
+        uint64 aIndex = 1;
+        uint64 bIndex = 2;
+
+        fundAccount(aIndex, 50 * 10 ** 18);
+
+        printBalancesStateL2();
+
+        uint16 count = 1;
+        
+        uint128 amount = 10 * 10 ** 18;
+
+        // create receipt
+        bytes32 receiptHash = receiptHash(aAddress, bAddress, amount, stateL2.currentCycleExpiry(), 1);
+        bytes memory aSignature = signMsg(receiptHash, aPvKey);
+        bytes memory bSignature = signMsg(receiptHash, bPvKey);
+
+        // prepare calldata
+        bytes memory calld = abi.encodePacked(bytes4(keccak256("post()")), aIndex, count, bIndex, amount, aSignature, bSignature);
+        (bool success, )   = address(stateL2).call(calld);
+
+        // State.Receipt memory rB = createReceipt(aAddress, bAddress, 0, 1);
+        // State.Update memory uB = offChainTransferUpdate(5 * 10 ** 18, rB, false, aPvKey, bPvKey);
+        // State.Receipt memory r = uB.receipt;
+        // console.logBytes(uB.aSignature);
+        // console.logBytes(uB.bSignature);
+        // bytes memory trial = abi.encodePacked(uint64(931), uint16(1), uint64(121), uint128(2121), uint32(2121), uB.aSignature, uB.bSignature);
+        // console.logBytes(trial);
+        // (bool success, ) = address(stateL2).call(abi.encodePacked(bytes4(keccak256("post()")), trial));
+        console.log(success, "return");
+        // assert(success == true);
+
+        printBalancesStateL2();
     }
 }
