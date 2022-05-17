@@ -40,15 +40,24 @@ contract Scaling is DSTest {
     TestToken token;
     Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
-    function setUsers() internal {
-        aAddress = vm.addr(aPvKey);
+    // Configs
+    uint256 usersCount = 200;
+    uint256 aFunding = 5000000 * 10 ** 18;
+    // amount = 3899.791821921342121326
+    uint128 dummyCharge = 3899791821921342121326;
 
-        // set pv keys
-        usersPvKey.push(0x831d7480b61ee56526758a07481b2a9118b31d0344555e60c1b834a74e67c2d9);
-        usersPvKey.push(0xde852a66883fca2228e9204dab49836a36140b461971e2054336168ffaf1b5e9);
-        usersPvKey.push(0xacc1d30d4404e1b3718806a041041d64ebab8d54dd251b381bfbbe61dac0c598);
-        usersPvKey.push(0xa0e474f007a85b9c35a30fd64c42edf4ed5ecda1e6694ec872f31fe1edf06613);
-        usersPvKey.push(0x15c9b49e26549f76cab5d52f9ed776105dfa6002e8b1d8858f3ca380abbc32d0);
+    // https://public-grafana.optimism.io/d/9hkhMxn7z/public-dashboard?orgId=1&refresh=5m
+    uint256 optimismL1GasPrice = 45;
+
+    function setUsers(uint256 count) internal {
+        aAddress = vm.addr(aPvKey);
+        string[] memory scriptArgs = new string[](1);
+        scriptArgs[0] =  "./pv_key.sh";
+        for (uint256 i = 0; i < count; i++) {
+            bytes memory raw = vm.ffi(scriptArgs);
+            uint256 pvKey = uint256(bytes32(raw));
+            usersPvKey.push(pvKey);
+        }
 
         // set addresses
         for (uint256 i = 0; i < usersPvKey.length; i++) {
@@ -57,7 +66,7 @@ contract Scaling is DSTest {
     }
 
     function setUp() public {
-        setUsers();
+        setUsers(usersCount);
 
         token = new TestToken(
             "TestToken",
@@ -129,11 +138,26 @@ contract Scaling is DSTest {
         data = abi.encodePacked(bytes4(keccak256("post()")), stateL2.usersIndex(aAddress), uint16(updates.length), data);
     }
 
+    function optimismL1Cost(bytes memory data) internal returns (uint256 cost){
+        uint256 gasUnits = 0;
+        for (uint256 i = 0; i < data.length; i++) {
+            if (uint8(data[i]) == 0) {
+                gasUnits += 4;
+            }else {
+                gasUnits += 16;
+            }
+        }
+        cost = (((gasUnits + 2100) * optimismL1GasPrice) * 124 ) / 100;
+
+        console.log("OP l1 gas units raw", gasUnits);
+        // console.log("OP l1 gas cost:", cost, " gwei");
+    }
+
     function test1() public {
         registerUsers();
 
-        // deposit 100 TT in a's account
-        fundAccount(stateL2.usersIndex(aAddress), 100 * 10 ** 18);
+        // fund a's account
+        fundAccount(stateL2.usersIndex(aAddress), aFunding);
 
         printBalances();
         
@@ -143,7 +167,7 @@ contract Scaling is DSTest {
             Receipt memory r = Receipt({
                 aAddress: aAddress,
                 bAddress: usersAddress[i],
-                amount: 10 * 10 ** 18,
+                amount: dummyCharge,
                 seqNo: 1,
                 expiresBy: stateL2.currentCycleExpiry()
             });
@@ -158,18 +182,21 @@ contract Scaling is DSTest {
             updates.push(u);
         }
 
+        bytes memory callD = genPostCalldata();
+        // l1 data cost
+        optimismL1Cost(callD);
+
         uint256 gasL;
         assembly {
             gasL := gas()
         }
-        (bool success, ) = address(stateL2).call(genPostCalldata());
+        (bool success, ) = address(stateL2).call(callD);
         assembly {
             gasL := sub(gasL, gas())
         }
-
-        console.log("Gas used", gasL);
-
+        console.log("Execution gas units:", gasL);
         assert(success);
+
         printBalances();
     }
 
