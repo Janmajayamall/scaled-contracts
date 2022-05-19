@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity ^0.8.13;
 
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
@@ -40,7 +40,7 @@ contract StateL2 {
 
     mapping(address => Account) public accounts;
     mapping(bytes32 => Record) public records;
-    mapping(address => uint256) public slashAmounts;
+    // mapping(address => uint256) public slashAmounts;
     mapping(address => uint256) public securityDeposits;
 
     // slashing amount = 1 Unit
@@ -104,21 +104,22 @@ contract StateL2 {
             revert();
         }
 
-        uint256 totalDeposit = securityDeposits[to] + amount;
+        // uint256 totalDeposit = securityDeposits[to] + amount;
         
-        // slash from `totalDeposit` if any
-        uint256 slash = slashAmounts[to];
-        if (slash != 0) {
-            if (slash > totalDeposit){
-                totalDeposit = 0;
-                slash -= totalDeposit;
-            }else {
-                totalDeposit -= slash;
-                slash = 0;
-            }
-            slashAmounts[to] = slash;
-        }
-        securityDeposits[to] = totalDeposit;
+        // // slash from `totalDeposit` if any
+        // uint256 slash = slashAmounts[to];
+        // if (slash != 0) {
+        //     if (slash > totalDeposit){
+        //         totalDeposit = 0;
+        //         slash -= totalDeposit;
+        //     }else {
+        //         totalDeposit -= slash;
+        //         slash = 0;
+        //     }
+        //     slashAmounts[to] = slash;
+        // }
+        // securityDeposits[to] = totalDeposit;
+        securityDeposits[to] += amount;
     }
 
 
@@ -137,19 +138,19 @@ contract StateL2 {
         // check whether we need to slash the user
         // Note that we don't slash from the account 
         // balance.
-        uint256 slash = slashAmounts[to];
-        if (slash != 0){
-            uint256 securityDeposit = securityDeposits[to];
-            if (slash > securityDeposit) {
-                securityDeposit = 0;
-                slash -= securityDeposit;
-            }else {
-                securityDeposit -= slash;
-                slash = 0;
-            }
-            slashAmounts[to] = slash;
-            securityDeposits[to] = securityDeposit;
-        }
+        // uint256 slash = slashAmounts[to];
+        // if (slash != 0){
+        //     uint256 securityDeposit = securityDeposits[to];
+        //     if (slash > securityDeposit) {
+        //         securityDeposit = 0;
+        //         slash -= securityDeposit;
+        //     }else {
+        //         securityDeposit -= slash;
+        //         slash = 0;
+        //     }
+        //     slashAmounts[to] = slash;
+        //     securityDeposits[to] = securityDeposit;
+        // }
         
         Account memory account = accounts[to];
         account.balance += uint128(amount);
@@ -175,19 +176,19 @@ contract StateL2 {
         }
 
         // check slashing
-        uint256 slash = slashAmounts[to];
-        if (slash != 0){
-            uint256 securityDeposit = securityDeposits[to];
-            if (slash > securityDeposit){
-                securityDeposit = 0;
-                slash -= securityDeposit;
-            }else {
-                slash = 0;
-                securityDeposit -= slash;
-            }
-            securityDeposits[to] = securityDeposit;
-            slashAmounts[to] = slash;
-        }
+        // uint256 slash = slashAmounts[to];
+        // if (slash != 0){
+        //     uint256 securityDeposit = securityDeposits[to];
+        //     if (slash > securityDeposit){
+        //         securityDeposit = 0;
+        //         slash -= securityDeposit;
+        //     }else {
+        //         slash = 0;
+        //         securityDeposit -= slash;
+        //     }
+        //     securityDeposits[to] = securityDeposit;
+        //     slashAmounts[to] = slash;
+        // }
 
         account.balance -= amount;
         accounts[to] = account;
@@ -305,14 +306,14 @@ contract StateL2 {
         }
     }
     
-    // calldata in sequence:
+    // calldata format:
     // {
     //     bytes4(keccack256(post()))
     //     aIndex (8 bytes)
     //     count (2 bytes)
     //     updates[]: each {
     //         bIndex (8 bytes)
-    //         amount (128 bytes)
+    //         amount (16 bytes)
     //         aSignature (65 bytes)
     //         bSignature (65 bytes)
     //     }
@@ -394,7 +395,8 @@ contract StateL2 {
 
             // Check whether to slash `a`
             if (record.slashed) {
-                slashAmounts[aAddress] += slashValue;
+                // slashAmounts[aAddress] += slashValue;
+                securityDeposits[aAddress] = 0;
             }
 
             // store updated record    
@@ -491,7 +493,8 @@ contract StateL2 {
         // for `amountDiff` here by scaling previous
         // slash amount.
         if (!record.slashed && slashed){
-            slashAmounts[aAddress] += slashValue;
+            // slashAmounts[aAddress] += slashValue;
+            securityDeposits[aAddress] = 0;
         }
 
         record.slashed = record.slashed || slashed;

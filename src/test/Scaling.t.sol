@@ -1,6 +1,6 @@
 
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity ^0.8.13;
 
 import "ds-test/test.sol";
 import "./../State.sol";
@@ -41,7 +41,7 @@ contract Scaling is DSTest {
     Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
     // Configs
-    uint256 usersCount = 200;
+    uint256 usersCount = 1;
     uint256 aFunding = 5000000 * 10 ** 18;
     // amount = 3899.791821921342121326
     uint128 dummyCharge = 3899791821921342121326;
@@ -161,7 +161,6 @@ contract Scaling is DSTest {
 
         printBalances();
         
-
         for (uint256 i = 0; i < usersAddress.length; i++) {
             // receipts
             Receipt memory r = Receipt({

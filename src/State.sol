@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity ^0.8.13;
 
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
@@ -393,4 +393,9 @@ contract State {
 //    be rejected).
 
 // Still thinking
-// 1. Should penalisation be proportional to `receipt.amount` or constant?
+// 1. Slash the entire amount for the sake of simplicity. 
+// 2. Since a user is only discouraged from double spending if they 
+// lose more in slashing than they gain, we need to bound the amount
+// a user stands to gain by double spending. We do this in following ways -
+// (a) Do not accept receipt with `amount` greater than 0.2-0.4 of `security deposits`.
+// (b) Do not accept receipt from users with unusually low balance.
