@@ -103,22 +103,7 @@ contract StateL2 {
             // user not registered
             revert();
         }
-
-        // uint256 totalDeposit = securityDeposits[to] + amount;
         
-        // // slash from `totalDeposit` if any
-        // uint256 slash = slashAmounts[to];
-        // if (slash != 0) {
-        //     if (slash > totalDeposit){
-        //         totalDeposit = 0;
-        //         slash -= totalDeposit;
-        //     }else {
-        //         totalDeposit -= slash;
-        //         slash = 0;
-        //     }
-        //     slashAmounts[to] = slash;
-        // }
-        // securityDeposits[to] = totalDeposit;
         securityDeposits[to] += amount;
     }
 
@@ -134,23 +119,6 @@ contract StateL2 {
             // user not registered
             revert();
         }
-
-        // check whether we need to slash the user
-        // Note that we don't slash from the account 
-        // balance.
-        // uint256 slash = slashAmounts[to];
-        // if (slash != 0){
-        //     uint256 securityDeposit = securityDeposits[to];
-        //     if (slash > securityDeposit) {
-        //         securityDeposit = 0;
-        //         slash -= securityDeposit;
-        //     }else {
-        //         securityDeposit -= slash;
-        //         slash = 0;
-        //     }
-        //     slashAmounts[to] = slash;
-        //     securityDeposits[to] = securityDeposit;
-        // }
         
         Account memory account = accounts[to];
         account.balance += uint128(amount);
@@ -174,21 +142,6 @@ contract StateL2 {
         if (account.withdrawAfter >= block.timestamp) {
             revert();
         }
-
-        // check slashing
-        // uint256 slash = slashAmounts[to];
-        // if (slash != 0){
-        //     uint256 securityDeposit = securityDeposits[to];
-        //     if (slash > securityDeposit){
-        //         securityDeposit = 0;
-        //         slash -= securityDeposit;
-        //     }else {
-        //         slash = 0;
-        //         securityDeposit -= slash;
-        //     }
-        //     securityDeposits[to] = securityDeposit;
-        //     slashAmounts[to] = slash;
-        // }
 
         account.balance -= amount;
         accounts[to] = account;
