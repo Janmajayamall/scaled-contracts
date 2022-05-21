@@ -29,10 +29,8 @@ contract StateL2 {
         uint16 seqNo;
         // Time after which update corresponding to this record will finalise
         uint32 fixedAfter;
-        // Flag of whether `a` was slashed for overspending
+        // Flag of whether `b` was slashed for overspending
         bool slashed;
-        // update expiresBy
-        uint32 expiresBy;
     }
 
     mapping(uint64 => address) public addresses;
@@ -196,16 +194,16 @@ contract StateL2 {
         uint64 aIndex,
         uint64 bIndex,
         uint128 amount,
-        uint16 seqNo,
-        uint32 expiresBy
+        uint32 expiresBy,
+        uint16 seqNo
     ) internal view returns (bytes32){
         return keccak256(
             abi.encodePacked(
                 aIndex,
                 bIndex,
                 amount,
-                seqNo,
-                expiresBy
+                expiresBy,
+                seqNo
             )
         );
     }
@@ -281,10 +279,9 @@ contract StateL2 {
             record.seqNo += 1;
             record.amount = pR.amount;
             record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
-            record.expiresBy = expiresBy;
 
             // validate signatures
-            bytes32 rHash = receiptHash(aIndex, pR.bIndex, pR.amount, record.seqNo, expiresBy);
+            bytes32 rHash = receiptHash(aIndex, pR.bIndex, pR.amount, expiresBy, record.seqNo);
             if (
                 ecdsaRecover(rHash, pR.aSignature) != aAddress ||
                 ecdsaRecover(rHash, pR.bSignature) != bAddress
@@ -357,7 +354,7 @@ contract StateL2 {
         Record memory record = records[rKey];
 
         // validate signatures & receipt
-        bytes32 rHash = receiptHash(aIndex, bIndex, newAmount, record.seqNo, expiresBy);
+        bytes32 rHash = receiptHash(aIndex, bIndex, newAmount, expiresBy, record.seqNo);
 
         if (
             ecdsaRecover(rHash, aSignature) != addresses[aIndex] ||
@@ -365,9 +362,7 @@ contract StateL2 {
             // amount of latest `receipt` is always greater
             record.amount >= newAmount || 
             // `expiresBy` should be a multiple `duration`
-            expiresBy % duration != 0 || 
-            // `expiresBy` should be equal OR greater than `record.expiresBy`
-            expiresBy < record.expiresBy ||
+            expiresBy % duration != 0 ||
             // cannot correct update after `fixedPeriod`
             record.fixedAfter <= block.timestamp
         ){
@@ -376,12 +371,18 @@ contract StateL2 {
 
         // update account objects
         uint128 amountDiff = newAmount - record.amount;
+        record.amount = newAmount;
         Account memory bAccount = accounts[bIndex];
-        bool slashed;
         if (bAccount.balance < amountDiff) {
+            // slash `b` only if they were not
+            // slashed for `seqNo` before
+            if (!record.slashed){
+                record.slashed = true;
+                securityDeposits[bIndex] = 0;
+            }
+
             amountDiff = bAccount.balance;
             bAccount.balance = 0;
-            slashed = true;
         }else {
             bAccount.balance -= amountDiff;
         }
@@ -393,17 +394,7 @@ contract StateL2 {
         bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
         accounts[bIndex] = bAccount;
 
-        // check whether `b` should be slashed
-        // Note we only slash `b` when they are not
-        // slashed befor for same `seqNo`
-        if (!record.slashed && slashed){
-            securityDeposits[bIndex] = 0;
-        }
-
-        record.slashed = record.slashed || slashed;
-        record.amount = newAmount;
         record.fixedAfter = uint32(block.timestamp) + bufferPeriod;
-        record.expiresBy = expiresBy;
         records[rKey] = record;
     }
 }

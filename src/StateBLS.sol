@@ -15,7 +15,6 @@ contract StateBLS {
         uint16 seqNo;
         uint32 fixedAfter;
         bool slashed;
-        uint32 expiresBy;
     }
 
     mapping (uint64 => address) addresses;
@@ -85,7 +84,7 @@ contract StateBLS {
         uint64 aIndex,
         uint64 bIndex,
         uint128 amount,
-        uint64 expiresBy,
+        uint32 expiresBy,
         uint16 seqNo
     ) internal returns (uint256[2] memory) {
         bytes memory message = abi.encodePacked(aIndex, bIndex, amount, expiresBy, seqNo);
@@ -119,7 +118,6 @@ contract StateBLS {
             bytes32 rKey = recordKey(aIndex, bIndex);
             Record memory record = records[rKey];
             record.amount = amount;
-            record.expiresBy = expiresBy;
             record.fixedAfter = uint32(block.timestamp + bufferPeriod);
             record.seqNo += 1;
 
@@ -170,5 +168,67 @@ contract StateBLS {
         // emit update event
     }
 
-    
+    function correctUpdate() external {
+        uint128 newAmount;
+        uint32 expiresBy;
+        uint256[2] memory signature;
+        uint64 aIndex;
+        uint64 bIndex;
+
+        // TODO get the data from assembly
+
+        bytes32 rKey = recordKey(aIndex, bIndex);
+        Record memory record = records[rKey];
+
+        if (
+            record.amount >= newAmount ||
+            record.fixedAfter <= block.timestamp ||
+            expiresBy % duration != 0 
+        ){
+            revert();
+        }
+
+        // validate signature
+        uint256[2] memory hash = msgHashBLS(aIndex, bIndex, newAmount, expiresBy, record.seqNo);
+        // FIXME aggregate public keys into one
+        uint256[4][] memory publicKeys = new uint256[4][](2);
+        publicKeys[0] = blsPublicKeys[aIndex];
+        publicKeys[1] = blsPublicKeys[bIndex];
+        uint256[2][] memory messages = new uint256[2][](2);
+        messages[0] = hash;
+        messages[1] = hash;
+        (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
+        if (!result || !success){
+            revert();
+        }
+
+        // update accounts
+        uint128 amountDiff = newAmount - record.amount;
+        record.amount = newAmount;
+        Account memory bAccount = accounts[bIndex];
+        if (bAccount.balance < amountDiff){
+            // slash `b` only if they were not
+            // slashed for `seqNo` before
+            if (!record.slashed){
+                record.slashed = true;
+                securityDeposits[bIndex] = 0;
+            }
+
+            amountDiff = bAccount.balance;
+            bAccount.balance = 0;
+        }else {
+            bAccount.balance -= amountDiff;
+        }
+        bAccount.withdrawAfter = uint32(block.timestamp + bufferPeriod);
+        accounts[bIndex] = bAccount;
+
+        Account memory aAccount = accounts[aIndex];
+        aAccount.balance += amountDiff;
+        accounts[aIndex] = aAccount;
+
+        // update record
+        record.fixedAfter = uint32(block.timestamp + bufferPeriod);
+        records[rKey] = record;
+    }
+
 }
