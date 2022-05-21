@@ -12,8 +12,8 @@ import "./Console.sol";
 contract Scaling is DSTest {
 
     struct Receipt {
-        address aAddress;
-        address bAddress;
+        uint64 aIndex;
+        uint64 bIndex;
         uint128 amount;
         uint16 seqNo;
         uint32 expiresBy;
@@ -34,7 +34,6 @@ contract Scaling is DSTest {
     // users are service requesters
     uint256[] usersPvKey;
     address[] usersAddress;
-    Update[] updates;
 
     StateL2 stateL2;
     TestToken token;
@@ -42,7 +41,7 @@ contract Scaling is DSTest {
 
     // Configs
     uint256 usersCount = 1;
-    uint256 aFunding = 5000000 * 10 ** 18;
+    uint256 intialFunding = 10000 * 10 ** 18;
     // amount = 3899.791821921342121326
     uint128 dummyCharge = 3899791821921342121326;
 
@@ -83,8 +82,8 @@ contract Scaling is DSTest {
         return
             keccak256(
                 abi.encodePacked(
-                    receipt.aAddress,
-                    receipt.bAddress,
+                    receipt.aIndex,
+                    receipt.bIndex,
                     receipt.amount,
                     receipt.seqNo,
                     receipt.expiresBy
@@ -92,14 +91,10 @@ contract Scaling is DSTest {
             );
     }
 
-    function printBalance(address user) internal view {
-        console.log(user, " user's balance: ", stateL2.getAccount(user).balance);
-    }
-
     function printBalances() internal view {
-        console.log("a's balance: ", stateL2.getAccount(aAddress).balance);
-        for (uint256 i = 0; i < usersAddress.length; i++) {
-            console.log(usersAddress[i], "'s balance: ", stateL2.getAccount(usersAddress[i]).balance);
+        console.log("a's balance: ", stateL2.getAccount(1).balance);
+        for (uint64 i = 0; i < usersAddress.length; i++) {
+            console.log(usersAddress[i], "'s balance: ", stateL2.getAccount(i + 2).balance);
         }
     }
 
@@ -118,24 +113,32 @@ contract Scaling is DSTest {
         stateL2.fundAccount(index);
     }
 
+    function fundAccounts() internal {
+        // a's account
+        fundAccount(1, intialFunding);
+        for (uint64 index = 0; index < usersAddress.length; index++) {
+            fundAccount(index + 2, intialFunding);
+        }
+    }
+
     function signMsg(bytes32 msgHash, uint256 pvKey) internal returns (bytes memory signature){
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pvKey, msgHash);
         signature = abi.encodePacked(r, s, v);
     }
 
-    function genPostCalldata() internal returns (bytes memory data){
+    function genPostCalldata(Update[] memory updates) internal returns (bytes memory data){
         for (uint256 i = 0; i < updates.length; i++) {
             // console.log("b's index", stateL2.usersIndex(updates[i].receipt.bAddress));
             data = abi.encodePacked(
                 data, 
-                stateL2.usersIndex(updates[i].receipt.bAddress),
+                uint64(i + 2),
                 updates[i].receipt.amount,
                 updates[i].aSignature,
                 updates[i].bSignature
             );
         }
 
-        data = abi.encodePacked(bytes4(keccak256("post()")), stateL2.usersIndex(aAddress), uint16(updates.length), data);
+        data = abi.encodePacked(bytes4(keccak256("post()")), uint64(1), uint16(updates.length), data);
     }
 
     function optimismL1Cost(bytes memory data) internal returns (uint256 cost){
@@ -155,17 +158,16 @@ contract Scaling is DSTest {
 
     function test1() public {
         registerUsers();
-
-        // fund a's account
-        fundAccount(stateL2.usersIndex(aAddress), aFunding);
+        fundAccounts();
 
         printBalances();
         
-        for (uint256 i = 0; i < usersAddress.length; i++) {
+        Update[] memory updates = new Update[](usersAddress.length);
+        for (uint64 i = 0; i < usersAddress.length; i++) {
             // receipts
             Receipt memory r = Receipt({
-                aAddress: aAddress,
-                bAddress: usersAddress[i],
+                aIndex: 1,
+                bIndex: i + 2,
                 amount: dummyCharge,
                 seqNo: 1,
                 expiresBy: stateL2.currentCycleExpiry()
@@ -178,10 +180,10 @@ contract Scaling is DSTest {
                 bSignature: signMsg(rHash, usersPvKey[i])
             });
 
-            updates.push(u);
+            updates[i] = u;
         }
 
-        bytes memory callD = genPostCalldata();
+        bytes memory callD = genPostCalldata(updates);
         // l1 data cost
         optimismL1Cost(callD);
 
@@ -198,7 +200,5 @@ contract Scaling is DSTest {
 
         printBalances();
     }
-
-
 
 }

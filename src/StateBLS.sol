@@ -18,9 +18,6 @@ contract StateBLS {
         uint32 expiresBy;
     }
 
-    // Mappings needed
-    // index to address
-    // index to blsPk (128 bytes)
     mapping (uint64 => address) addresses;
     mapping (uint64 => uint256[4]) blsPublicKeys;
     mapping (uint64 => Account) accounts;
@@ -109,7 +106,6 @@ contract StateBLS {
             mstore(add(signature, 64), calldataload(46))
         }
 
-        uint256[4] memory aPublicKey = blsPublicKeys[aIndex];
         Account memory aAccount = accounts[aIndex];
         
         uint256[4][] memory publicKeys = new uint256[4][](count * 2);
@@ -127,21 +123,23 @@ contract StateBLS {
             record.fixedAfter = uint32(block.timestamp + bufferPeriod);
             record.seqNo += 1;
 
-            uint256[4] memory bPublicKey = blsPublicKeys[bIndex];
+            // prepare msg & b's key for signature verification
             uint256[2] memory hash = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
             messages[i] = hash;
-            messages[count+i] = hash;
-            publicKeys[i] = bPublicKey;
-            publicKeys[count+i] = aPublicKey;
-
+            messages[count + i] = hash; // for `a`
+            publicKeys[i] = blsPublicKeys[bIndex];
+            
+            // update account
             Account memory bAccount = accounts[bIndex];
             if (bAccount.balance < amount){
                 amount = bAccount.balance;
                 bAccount.balance = 0;
                 // slash `b`
                 securityDeposits[bIndex] = 0;
+                record.slashed = true;
             }else {
                 bAccount.balance -= amount;
+                record.slashed = false;
             }
             aAccount.balance += amount;
 
@@ -151,9 +149,17 @@ contract StateBLS {
             // increase their balance, not decrease.
             bAccount.withdrawAfter = uint32(block.timestamp + bufferPeriod);
             accounts[bIndex] = bAccount;
+
+            records[rKey] = record;
         }
 
         accounts[aIndex] = aAccount;
+
+        // fill in publicKeys for `a`
+        uint256[4] memory aPublicKey = blsPublicKeys[aIndex];
+        for (uint256 i = 0; i < count; i++) {
+            publicKeys[count + i] = aPublicKey;
+        }
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
@@ -164,12 +170,5 @@ contract StateBLS {
         // emit update event
     }
 
+    
 }
-
-// fullReceipt {
-//     aIndex
-//     bIndex
-//     amount
-//     expiresBy
-//     seqNo.
-// }

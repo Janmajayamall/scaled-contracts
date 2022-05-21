@@ -10,6 +10,8 @@ import {
     @title  Boneh–Lynn–Shacham (BLS) signature scheme on Barreto-Naehrig 254 bit curve (BN-254)
     @notice We use BLS signature aggregation to reduce the size of signature data to store on chain.
     @dev We use G1 points for signatures and messages, and G2 points for public keys
+
+    Taken from https://github.com/thehubbleproject/hubble-contracts/tree/master/contracts/libs
  */
 library BLS {
     // Field order

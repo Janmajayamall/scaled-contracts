@@ -38,10 +38,10 @@ contract StateL2 {
     mapping(uint64 => address) public addresses;
     mapping(address => uint64) public usersIndex;
 
-    mapping(address => Account) public accounts;
+    mapping(uint64 => Account) public accounts;
     mapping(bytes32 => Record) public records;
-    // mapping(address => uint256) public slashAmounts;
-    mapping(address => uint256) public securityDeposits;
+    // mapping(index => uint256) public slashAmounts;
+    mapping(uint64 => uint256) public securityDeposits;
 
     // slashing amount = 1 Unit
     uint256 constant slashValue = 1e18;
@@ -60,36 +60,37 @@ contract StateL2 {
         token = _token;
     }
 
+    modifier registeredOnly (uint64 toIndex) {
+        address user = addresses[toIndex];
+        if (user == address(0)) {
+            // user not registered
+            revert();
+        }
+        _;
+    }
+
     function currentCycleExpiry() public view returns (uint32) {
         // `expiredBy` value of a `receipt = roundUp(block.timestamp / duration) * duration`
         return uint32(((block.timestamp / duration) + 1) * duration);
     }
 
-    function recordKey(address aAddress, address bAddress)
+    function recordKey(uint64 a, uint64 b)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(aAddress, bAddress));
+        return keccak256(abi.encodePacked(a, "++", b));
     }
 
-    function getAccount(address _of) public view returns (Account memory a){
-        a = accounts[_of];
+    function getAccount(uint64 ofIndex) public view returns (Account memory a){
+        a = accounts[ofIndex];
     }
 
     function register(address user) external {
-        if (usersIndex[user] != 0) {
-            // already registered
-            revert();
-        }
-
-        uint64 c = userCount;
-        c += 1;
-        addresses[c] = user;
-        usersIndex[user] = c;
+        uint64 c = userCount + 1;
         userCount = c;
 
-        // console.log("registered:", user);
+        addresses[c] = user;
     }
 
     function depositSecurity(uint64 toIndex) external {
@@ -98,13 +99,7 @@ contract StateL2 {
         uint256 amount = balance - reserves;
         reserves = balance;
 
-        address to = addresses[toIndex];
-        if (to == address(0)) {
-            // user not registered
-            revert();
-        }
-        
-        securityDeposits[to] += amount;
+        securityDeposits[toIndex] += amount;
     }
 
 
@@ -114,28 +109,14 @@ contract StateL2 {
         uint256 amount = balance - reserves;
         reserves = balance;
 
-        address to = addresses[toIndex];
-        if (to == address(0)) {
-            // user not registered
-            revert();
-        }
-        
-        Account memory account = accounts[to];
+        Account memory account = accounts[toIndex];
         account.balance += uint128(amount);
-        accounts[to] = account;
-
-        // emit event
+        accounts[toIndex] = account;
     }
 
 
-    function withdraw(uint64 toIndex, uint128 amount) external {
-        address to = addresses[toIndex];
-        if (to == address(0)) {
-            // user not registered
-            revert();
-        }
-
-        Account memory account = accounts[to];
+    function withdraw(uint64 fromIndex, uint128 amount,bytes memory signature) external {
+        Account memory account = accounts[fromIndex];
 
         // check whether user's account isn't in
         // buffer period
@@ -144,9 +125,9 @@ contract StateL2 {
         }
 
         account.balance -= amount;
-        accounts[to] = account;
+        accounts[fromIndex] = account;
 
-        Transfers.safeTransfer(IERC20(token), to, amount);
+        Transfers.safeTransfer(IERC20(token), addresses[fromIndex], amount);
         reserves -= amount;
 
         // emit event
@@ -212,16 +193,16 @@ contract StateL2 {
     }
 
     function receiptHash(
-        address aAddress,
-        address bAddress,
+        uint64 aIndex,
+        uint64 bIndex,
         uint128 amount,
         uint16 seqNo,
         uint32 expiresBy
     ) internal view returns (bytes32){
         return keccak256(
             abi.encodePacked(
-                aAddress,
-                bAddress,
+                aIndex,
+                bIndex,
                 amount,
                 seqNo,
                 expiresBy
@@ -280,34 +261,19 @@ contract StateL2 {
             count := shr(240, calldataload(add(4, 8)))
         }
 
-        // console.log("aIndex", aIndex);
-        // console.log("count", count);
-        
-        // a should have registered
         address aAddress = addresses[aIndex];
-        if (aAddress == address(0)) {
-            revert();
-        }
-
-        // console.log("aAddress", aAddress);
+        Account memory aAccount = accounts[aIndex];
 
         uint32 expiresBy = currentCycleExpiry();
 
         for (uint256 i = 0; i < count; i++) {
-            // console.log("*********************");
-            // console.log("Processing index ", i);
             PartialReceipt memory pR = getUpdateAtIndex(i);
 
             address bAddress = addresses[pR.bIndex];
-            if (bAddress == address(0)){
-                revert();
-            }
-
-            // console.log("bAddress", bAddress);
 
             bytes32 rKey = recordKey(
-                aAddress,
-                bAddress
+                aIndex,
+                pR.bIndex
             );   
             Record memory record = records[rKey];
 
@@ -318,8 +284,7 @@ contract StateL2 {
             record.expiresBy = expiresBy;
 
             // validate signatures
-            // Note since `expiresBy` is derived on-chain we don't need to check it
-            bytes32 rHash = receiptHash(aAddress, bAddress, pR.amount, record.seqNo, expiresBy);
+            bytes32 rHash = receiptHash(aIndex, pR.bIndex, pR.amount, record.seqNo, expiresBy);
             if (
                 ecdsaRecover(rHash, pR.aSignature) != aAddress ||
                 ecdsaRecover(rHash, pR.bSignature) != bAddress
@@ -328,36 +293,28 @@ contract StateL2 {
             }
 
             // update account objects
-            Account memory aAccount = accounts[aAddress];
-            if (aAccount.balance < pR.amount){
-                // slashing of A
-                pR.amount = aAccount.balance;
-                aAccount.balance = 0;
+            Account memory bAccount = accounts[pR.bIndex];
+            if (bAccount.balance < pR.amount){
+                // slashing `b`
+                securityDeposits[pR.bIndex] = 0;
                 record.slashed = true;
+
+                pR.amount = bAccount.balance;
+                bAccount.balance = 0;
             }else {
-                aAccount.balance -= pR.amount;
+                bAccount.balance -= pR.amount;
                 record.slashed = false;
             }
-            Account memory bAccount = accounts[bAddress];
+            aAccount.balance += pR.amount;
             bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
-            bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
-            bAccount.balance += pR.amount;
             
-            accounts[aAddress] = aAccount;
-            accounts[bAddress] = bAccount;
-
-            // Check whether to slash `a`
-            if (record.slashed) {
-                // slashAmounts[aAddress] += slashValue;
-                securityDeposits[aAddress] = 0;
-            }
+            accounts[pR.bIndex] = bAccount;
 
             // store updated record    
             records[rKey] = record;
-
-            // console.log("*********************");
         }   
 
+        accounts[aIndex] = aAccount;
         // emit event     
     }
 
@@ -396,23 +353,21 @@ contract StateL2 {
             mstore(add(bSignature,96), calldataload(offset))
         }
 
-        address aAddress = addresses[aIndex];
-        address bAddress = addresses[bIndex];
-
-        bytes32 rKey = recordKey(aAddress, bAddress);
+        bytes32 rKey = recordKey(aIndex, bIndex);
         Record memory record = records[rKey];
 
         // validate signatures & receipt
-        bytes32 rHash = receiptHash(aAddress, bAddress, newAmount, record.seqNo, expiresBy);
+        bytes32 rHash = receiptHash(aIndex, bIndex, newAmount, record.seqNo, expiresBy);
+
         if (
-            ecdsaRecover(rHash, aSignature) != aAddress ||
-            ecdsaRecover(rHash, bSignature) != bAddress ||
+            ecdsaRecover(rHash, aSignature) != addresses[aIndex] ||
+            ecdsaRecover(rHash, bSignature) != addresses[bIndex] ||
             // amount of latest `receipt` is always greater
             record.amount >= newAmount || 
             // `expiresBy` should be a multiple `duration`
-            expiresBy % duration == 0 || 
-            // `expiresBy` should be greater than `record.expiresBy`
-            expiresBy <= record.expiresBy ||
+            expiresBy % duration != 0 || 
+            // `expiresBy` should be equal OR greater than `record.expiresBy`
+            expiresBy < record.expiresBy ||
             // cannot correct update after `fixedPeriod`
             record.fixedAfter <= block.timestamp
         ){
@@ -421,33 +376,28 @@ contract StateL2 {
 
         // update account objects
         uint128 amountDiff = newAmount - record.amount;
-        Account memory aAccount = accounts[aAddress];
+        Account memory bAccount = accounts[bIndex];
         bool slashed;
-        if (aAccount.balance < amountDiff) {
-            amountDiff = aAccount.balance;
-            aAccount.balance = 0;
+        if (bAccount.balance < amountDiff) {
+            amountDiff = bAccount.balance;
+            bAccount.balance = 0;
             slashed = true;
         }else {
-            aAccount.balance -= amountDiff;
+            bAccount.balance -= amountDiff;
         }
-        Account memory bAccount = accounts[bAddress];
-        bAccount.balance += amountDiff;
-        aAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
-        bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
-        accounts[aAddress] = aAccount;
-        accounts[bAddress] = bAccount;
 
-        // check whether `a` should be slashed
-        // Note we are assumming that slash value is constant
-        // irrespective of `amount` overcommitted, which is why 
-        // `a` cannot be slashed twice for smae sequence no. 
-        // If we switch to slashing being proportional
-        // to `amount` then we will have to accomodate
-        // for `amountDiff` here by scaling previous
-        // slash amount.
+        Account memory aAccount = accounts[aIndex];
+        aAccount.balance += amountDiff;
+        accounts[aIndex] = aAccount;
+
+        bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
+        accounts[bIndex] = bAccount;
+
+        // check whether `b` should be slashed
+        // Note we only slash `b` when they are not
+        // slashed befor for same `seqNo`
         if (!record.slashed && slashed){
-            // slashAmounts[aAddress] += slashValue;
-            securityDeposits[aAddress] = 0;
+            securityDeposits[bIndex] = 0;
         }
 
         record.slashed = record.slashed || slashed;

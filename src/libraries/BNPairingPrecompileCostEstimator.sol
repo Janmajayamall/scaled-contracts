@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.6.12;
 
+/// Taken from https://github.com/thehubbleproject/hubble-contracts/tree/master/contracts/libs
 contract BNPairingPrecompileCostEstimator {
     uint256 public baseCost;
     uint256 public perPairCost;
