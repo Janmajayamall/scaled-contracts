@@ -26,7 +26,7 @@ contract StateBLS {
     mapping (bytes32 => Record) records;
     mapping (uint64 => uint256) securityDeposits;
 
-    uint64 public userCount;
+    uint64 public userCount = 4294967296;
     address immutable token;
     uint256 reserves;
 

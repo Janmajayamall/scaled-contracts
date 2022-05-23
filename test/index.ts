@@ -43,7 +43,7 @@ describe("Tesst1", function () {
 		for (let i = 0; i < count; i++) {
 			let w = (await ethers.getSigners())[i];
 			users.push({
-				index: BigNumber.from(i + 1),
+				index: BigNumber.from(4294967296 + i + 1),
 				wallet: w,
 				blsSigner: factory.getSigner(domain),
 			});
@@ -133,9 +133,27 @@ describe("Tesst1", function () {
 		}
 	}
 
+	function calculateOPL1Cost(data: Uint8Array): Number {
+		let gasCostWei = utils.parseUnits("23", 9);
+		let ethUSD = 3000;
+
+		let gasUnits = 0;
+		data.forEach((b) => {
+			if (b == 0) {
+				gasUnits += 4;
+			} else {
+				gasUnits += 16;
+			}
+		});
+
+		let costWei = BigNumber.from(gasUnits + 2100).mul(gasCostWei);
+		console.log(costWei, " Cost Wei", gasUnits);
+		return Number(utils.formatEther(costWei)) * 1.25 * ethUSD;
+	}
+
 	it("Should work", async function () {
 		const blsSignerFactory = await BlsSignerFactory.new();
-		const users = await setUp(4, blsSignerFactory);
+		const users = await setUp(50, blsSignerFactory);
 
 		const Token = await ethers.getContractFactory(
 			"TestToken",
@@ -180,10 +198,10 @@ describe("Tesst1", function () {
 			...utils.arrayify(stateBLS.interface.getSighash("post()")),
 			...calldata,
 		]);
-		let d = await stateBLS.provider.call(
-			prepareTransaction(stateBLS, calldata)
-		);
-		console.log(d, " d is here!");
+
+		console.log("OP L1 data cost: ", calculateOPL1Cost(calldata));
+
+		await stateBLS.provider.call(prepareTransaction(stateBLS, calldata));
 
 		// // let d = stateBLS.interface.encodeFunctionData("post", [calldata]);
 	});
