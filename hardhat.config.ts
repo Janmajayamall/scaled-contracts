@@ -25,7 +25,7 @@ module.exports = {
 			},
 		},
 	},
-	paths: { cache: "hh_cache" },
+	paths: { cache: "./hh_cache", tests: "./src/test" },
 	gasReporter: {
 		enabled: true,
 	},
