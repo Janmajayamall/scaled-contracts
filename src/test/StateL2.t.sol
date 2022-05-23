@@ -8,7 +8,7 @@ import "./TestToken.sol";
 import "./Vm.sol";
 import "./Console.sol";
 
-contract Scaling is DSTest {
+contract StateL2Test is DSTest {
 
     struct Receipt {
         uint64 aIndex;
@@ -84,8 +84,8 @@ contract Scaling is DSTest {
                     receipt.aIndex,
                     receipt.bIndex,
                     receipt.amount,
-                    receipt.seqNo,
-                    receipt.expiresBy
+                    receipt.expiresBy,
+                    receipt.seqNo
                 )
             );
     }

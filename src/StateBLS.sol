@@ -80,6 +80,7 @@ contract StateBLS {
         // emit event
     }
 
+
     function msgHashBLS(
         uint64 aIndex,
         uint64 bIndex,
@@ -219,7 +220,7 @@ contract StateBLS {
         }else {
             bAccount.balance -= amountDiff;
         }
-        bAccount.withdrawAfter = uint32(block.timestamp + bufferPeriod);
+        bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
         accounts[bIndex] = bAccount;
 
         Account memory aAccount = accounts[aIndex];

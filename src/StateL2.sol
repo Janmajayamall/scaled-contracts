@@ -58,15 +58,6 @@ contract StateL2 {
         token = _token;
     }
 
-    modifier registeredOnly (uint64 toIndex) {
-        address user = addresses[toIndex];
-        if (user == address(0)) {
-            // user not registered
-            revert();
-        }
-        _;
-    }
-
     function currentCycleExpiry() public view returns (uint32) {
         // `expiredBy` value of a `receipt = roundUp(block.timestamp / duration) * duration`
         return uint32(((block.timestamp / duration) + 1) * duration);
