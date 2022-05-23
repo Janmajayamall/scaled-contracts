@@ -3,7 +3,7 @@ pragma solidity ^0.8.13;
 
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
-import "./test/Console.sol";
+import "./../test/Console.sol";
 
 /// Optimizes heavily to reduce calldata
 contract StateL2 {
@@ -104,6 +104,7 @@ contract StateL2 {
     }
 
 
+    // TODO add signature verification here
     function withdraw(uint64 fromIndex, uint128 amount,bytes memory signature) external {
         Account memory account = accounts[fromIndex];
 

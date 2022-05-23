@@ -2,6 +2,9 @@
 pragma solidity ^0.8.13;
 
 import {BLS} from "./libraries/BLS.sol";
+import "./interfaces/IERC20.sol";
+import "./libraries/Transfers.sol";
+import "hardhat/console.sol";
 
 contract StateBLS {
 
@@ -21,18 +24,20 @@ contract StateBLS {
     mapping (uint64 => uint256[4]) blsPublicKeys;
     mapping (uint64 => Account) accounts;
     mapping (bytes32 => Record) records;
-
     mapping (uint64 => uint256) securityDeposits;
 
     uint64 public userCount;
+    address immutable token;
+    uint256 reserves;
 
-    bytes32 constant blsDomain = keccak256("Test");
-
+    bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
     uint32 constant bufferPeriod = uint32(7 days);
-
     // duration is a week in seconds
     uint32 constant duration = 604800;
 
+    constructor(address _token) {
+        token = _token;
+    }
 
     function currentCycleExpiry() public view returns (uint32) {
         // `expiredBy` value of a `receipt = roundUp(block.timestamp / duration) * duration`
@@ -43,13 +48,22 @@ contract StateBLS {
         return keccak256(abi.encode(a, "++", b));
     }
 
+    function getTokenBalance(address user) internal view returns(uint256) {
+        (bool success, bytes memory data) = token.staticcall(abi.encodeWithSelector(IERC20.balanceOf.selector, user));
+        if (!success || data.length != 32){
+            // revert with balance error
+            revert();
+        }
+        return abi.decode(data, (uint256));
+    }
+
     function getUpdateAtIndex(uint256 i) internal view returns (
         // 8 bytes
         uint64 bIndex,
         // 16 bytes
         uint128 amount
     ){
-        uint256 offset = 14 + (i * 24);
+        uint256 offset = 78 + (i * 24);
         assembly {
             bIndex := shr(192, calldataload(offset))
 
@@ -78,6 +92,7 @@ contract StateBLS {
         blsPublicKeys[userIndex] = pk;
 
         // emit event
+        console.log("Registerd user: ", userAddress, " at index:", userIndex);
     }
 
 
@@ -92,6 +107,28 @@ contract StateBLS {
         return BLS.hashToPoint(blsDomain, message);
     }
 
+    function depositSecurity(uint64 toIndex) external {
+         // get amount deposited
+        uint256 balance = getTokenBalance(address(this));
+        uint256 amount = balance - reserves;
+        reserves = balance;
+
+        securityDeposits[toIndex] += amount;
+    }
+
+    function fundAccount(uint64 toIndex) external {
+        // get amount deposited
+        uint256 balance = getTokenBalance(address(this));
+        uint256 amount = balance - reserves;
+        reserves = balance;
+
+        console.log("Funding account of user with address: ", addresses[toIndex]);
+
+        Account memory account = accounts[toIndex];
+        account.balance += uint128(amount);
+        accounts[toIndex] = account;
+    }
+
     function post() external {
         uint64 aIndex;
         uint16 count;
@@ -102,9 +139,15 @@ contract StateBLS {
             count := shr(240, calldataload(12))
 
             // signature
-            mstore(add(signature, 32), calldataload(14))
-            mstore(add(signature, 64), calldataload(46))
+            mstore(add(signature, 0), calldataload(14))
+            mstore(add(signature, 32), calldataload(46))
         }
+
+        console.logBytes32(blsDomain);
+        console.log("count:", count);
+        console.log("aIndex:", aIndex);
+        console.log("signature[0]", signature[0]);
+        console.log("signature[1]", signature[1]);
 
         Account memory aAccount = accounts[aIndex];
         
@@ -112,9 +155,14 @@ contract StateBLS {
         uint256[2][] memory messages = new uint256[2][](count * 2);
 
         uint32 expiresBy = currentCycleExpiry();
+        console.log("currentCycleExpiry:" ,expiresBy);
 
         for (uint256 i = 0; i < count; i++) {
             (uint64 bIndex, uint128 amount) = getUpdateAtIndex(i);
+
+            console.log("Update", i);
+            console.log("bIndex", bIndex);
+            console.log("amount", amount);
 
             bytes32 rKey = recordKey(aIndex, bIndex);
             Record memory record = records[rKey];
@@ -124,6 +172,8 @@ contract StateBLS {
 
             // prepare msg & b's key for signature verification
             uint256[2] memory hash = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
+            console.log("Hash[0]", hash[0]);
+            console.log("Hash[1]", hash[1]);
             messages[i] = hash;
             messages[count + i] = hash; // for `a`
             publicKeys[i] = blsPublicKeys[bIndex];
@@ -159,9 +209,10 @@ contract StateBLS {
         for (uint256 i = 0; i < count; i++) {
             publicKeys[count + i] = aPublicKey;
         }
-
+        console.log("It's here1!");
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
+        console.log(result, success, "It's here!");
         if (!result || !success){
             revert();
         }
@@ -188,6 +239,7 @@ contract StateBLS {
         ){
             revert();
         }
+
 
         // validate signature
         uint256[2] memory hash = msgHashBLS(aIndex, bIndex, newAmount, expiresBy, record.seqNo);

@@ -5,6 +5,7 @@ import { ModexpInverse, ModexpSqrt } from "./ModExp.sol";
 import {
     BNPairingPrecompileCostEstimator
 } from "./BNPairingPrecompileCostEstimator.sol";
+import "hardhat/console.sol";
 
 /**
     @title  Boneh–Lynn–Shacham (BLS) signature scheme on Barreto-Naehrig 254 bit curve (BN-254)
@@ -117,11 +118,13 @@ library BLS {
         uint256[1] memory out;
 
         // prettier-ignore
-        uint256 precompileGasCost = BNPairingPrecompileCostEstimator(COST_ESTIMATOR_ADDRESS).getGasCost(size + 1);
+        // TODO revert the comment below
+        // uint256 precompileGasCost = BNPairingPrecompileCostEstimator(COST_ESTIMATOR_ADDRESS).getGasCost(size + 1);
+
         // solium-disable-next-line security/no-inline-assembly
         assembly {
             callSuccess := staticcall(
-                precompileGasCost,
+                gas(),
                 8,
                 add(input, 0x20),
                 mul(inputSize, 0x20),

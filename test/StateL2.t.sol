@@ -3,7 +3,7 @@
 pragma solidity ^0.8.13;
 
 import "ds-test/test.sol";
-import "./../StateL2.sol";
+import "./../src/StateL2.sol";
 import "./TestToken.sol";
 import "./Vm.sol";
 import "./Console.sol";
