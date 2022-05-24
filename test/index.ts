@@ -10,6 +10,7 @@ import { BigNumber, utils, Transaction, Contract, Wallet } from "ethers";
 import { TransactionRequest } from "@ethersproject/abstract-provider";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { arrayify } from "ethers/lib/utils";
+import { randomBytes } from "crypto";
 
 describe("Tesst1", function () {
 	interface Receipt {
@@ -28,7 +29,7 @@ describe("Tesst1", function () {
 
 	interface User {
 		index: BigNumber;
-		wallet: SignerWithAddress;
+		wallet: Wallet;
 		blsSigner: BlsSignerInterface;
 	}
 
@@ -36,16 +37,21 @@ describe("Tesst1", function () {
 		count: Number,
 		factory: BlsSignerFactory
 	): Promise<Array<User>> {
-		console.log("domain: ", utils.solidityKeccak256(["string"], ["test"]));
 		const domain = arrayify(utils.solidityKeccak256(["string"], ["test"]));
 		let users: Array<User> = [];
 
+		const first = (await ethers.getSigners())[0];
+
 		for (let i = 0; i < count; i++) {
-			let w = (await ethers.getSigners())[i];
 			users.push({
 				index: BigNumber.from(4294967296 + i + 1),
-				wallet: w,
+				wallet: Wallet.createRandom().connect(ethers.provider),
 				blsSigner: factory.getSigner(domain),
+			});
+
+			first.sendTransaction({
+				to: users[i].wallet.address,
+				value: utils.parseEther("1"),
 			});
 		}
 		return users;
@@ -67,7 +73,10 @@ describe("Tesst1", function () {
 		};
 	}
 
-	function preparePostCalldata(updates: Array<Update>): Uint8Array {
+	function preparePostCalldata(
+		updates: Array<Update>,
+		aIndex: BigNumber
+	): Uint8Array {
 		// aggregate signatures
 		let sigs: solG1[] = [];
 		updates.map((u) => {
@@ -78,7 +87,7 @@ describe("Tesst1", function () {
 
 		let calldata = new Uint8Array([
 			// index of `a` is 1
-			...utils.arrayify(utils.solidityPack(["uint64"], [1])),
+			...utils.arrayify(utils.solidityPack(["uint64"], [aIndex])),
 			...utils.arrayify(utils.solidityPack(["uint16"], [updates.length])),
 			...utils.arrayify(
 				utils.solidityPack(
@@ -111,7 +120,7 @@ describe("Tesst1", function () {
 			to: contract.address,
 			chainId: 123,
 			nonce: 1,
-			gasLimit: BigNumber.from(2000000),
+			gasLimit: BigNumber.from(20000000),
 			value: BigNumber.from(0),
 			data: utils.hexlify(calldata),
 		};
@@ -122,7 +131,7 @@ describe("Tesst1", function () {
 		state: Contract,
 		users: Array<User>
 	) {
-		let amount = utils.parseUnits("100", 18);
+		let amount = utils.parseUnits("100000000", 18);
 		for (let i = 0; i < users.length; i++) {
 			await token
 				.connect(users[0].wallet)
@@ -133,8 +142,12 @@ describe("Tesst1", function () {
 		}
 	}
 
+	function getRandomBN(bytes: number): BigNumber {
+		return BigNumber.from(`0x${randomBytes(bytes).toString("hex")}`);
+	}
+
 	function calculateOPL1Cost(data: Uint8Array): Number {
-		let gasCostWei = utils.parseUnits("23", 9);
+		let gasCostWei = utils.parseUnits("30", 9);
 		let ethUSD = 3000;
 
 		let gasUnits = 0;
@@ -146,14 +159,17 @@ describe("Tesst1", function () {
 			}
 		});
 
+		console.log("Gas Units:", gasUnits);
+
 		let costWei = BigNumber.from(gasUnits + 2100).mul(gasCostWei);
-		console.log(costWei, " Cost Wei", gasUnits);
+		console.log("Cost Wei", costWei);
+
 		return Number(utils.formatEther(costWei)) * 1.25 * ethUSD;
 	}
 
 	it("Should work", async function () {
 		const blsSignerFactory = await BlsSignerFactory.new();
-		const users = await setUp(50, blsSignerFactory);
+		const users = await setUp(100, blsSignerFactory);
 
 		const Token = await ethers.getContractFactory(
 			"TestToken",
@@ -167,6 +183,9 @@ describe("Tesst1", function () {
 
 		const StateBLS = await ethers.getContractFactory("StateBLS");
 		const stateBLS = await StateBLS.deploy(testToken.address);
+
+		const currentCycle = await stateBLS.currentCycleExpiry();
+		console.log(currentCycle, "Current Cycle");
 
 		// register users
 		for (let i = 0; i < users.length; i++) {
@@ -186,20 +205,20 @@ describe("Tesst1", function () {
 				let r: Receipt = {
 					aIndex: users[0].index,
 					bIndex: u.index,
-					amount: utils.parseUnits("1", 18),
-					expiresBy: BigNumber.from(1653523200),
+					amount: getRandomBN(16),
+					expiresBy: BigNumber.from(currentCycle),
 					seqNo: BigNumber.from(1),
 				};
 				updates.push(getUpdate(users[0], u, r));
 			}
 		});
-		let calldata = preparePostCalldata(updates);
+		let calldata = preparePostCalldata(updates, users[0].index);
 		calldata = new Uint8Array([
 			...utils.arrayify(stateBLS.interface.getSighash("post()")),
 			...calldata,
 		]);
 
-		console.log("OP L1 data cost: ", calculateOPL1Cost(calldata));
+		console.log("OP L1 data cost in USD: ", calculateOPL1Cost(calldata));
 
 		await stateBLS.provider.call(prepareTransaction(stateBLS, calldata));
 

@@ -1,4 +1,5 @@
 import "@nomiclabs/hardhat-ethers";
+import "hardhat-gas-reporter";
 
 module.exports = {
 	defaultNetwork: "hardhat",
@@ -27,6 +28,6 @@ module.exports = {
 	},
 	paths: { cache: "./hh_cache" },
 	gasReporter: {
-		enabled: true,
+		enabled: false,
 	},
 };

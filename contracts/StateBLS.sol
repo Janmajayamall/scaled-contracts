@@ -26,6 +26,7 @@ contract StateBLS {
     mapping (bytes32 => Record) records;
     mapping (uint64 => uint256) securityDeposits;
 
+    // FIXME: userCount is set to higher value for tests only   
     uint64 public userCount = 4294967296;
     address immutable token;
     uint256 reserves;
@@ -70,14 +71,6 @@ contract StateBLS {
             offset := add(offset, 8)
             amount := shr(128, calldataload(offset))
         }
-
-        // console.log("---------------");
-        // console.log("Gen Update");
-        // console.log("bIndex", r.bIndex);
-        // console.log("amount", amount);
-        // console.logBytes(r.aSignature);
-        // console.logBytes(r.bSignature);
-        // console.log("---------------");
     }
 
     function register(
@@ -92,9 +85,8 @@ contract StateBLS {
         blsPublicKeys[userIndex] = pk;
 
         // emit event
-        console.log("Registerd user: ", userAddress, " at index:", userIndex);
+        // console.log("Registerd user: ", userAddress, " at index:", userIndex);
     }
-
 
     function msgHashBLS(
         uint64 aIndex,
@@ -122,7 +114,7 @@ contract StateBLS {
         uint256 amount = balance - reserves;
         reserves = balance;
 
-        console.log("Funding account of user with address: ", addresses[toIndex]);
+        // console.log("Funding account of user with address: ", addresses[toIndex]);
 
         Account memory account = accounts[toIndex];
         account.balance += uint128(amount);
@@ -130,6 +122,9 @@ contract StateBLS {
     }
 
     function post() external {
+        // FIXME: Only for measuring executation gas
+        uint gasRef = gasleft();
+
         uint64 aIndex;
         uint16 count;
         uint256[2] memory signature;
@@ -143,11 +138,11 @@ contract StateBLS {
             mstore(add(signature, 32), calldataload(46))
         }
 
-        console.logBytes32(blsDomain);
-        console.log("count:", count);
-        console.log("aIndex:", aIndex);
-        console.log("signature[0]", signature[0]);
-        console.log("signature[1]", signature[1]);
+        // console.logBytes32(blsDomain);
+        // console.log("count:", count);
+        // console.log("aIndex:", aIndex);
+        // console.log("signature[0]", signature[0]);
+        // console.log("signature[1]", signature[1]);
 
         Account memory aAccount = accounts[aIndex];
         
@@ -155,14 +150,14 @@ contract StateBLS {
         uint256[2][] memory messages = new uint256[2][](count * 2);
 
         uint32 expiresBy = currentCycleExpiry();
-        console.log("currentCycleExpiry:" ,expiresBy);
+        // console.log("currentCycleExpiry:" ,expiresBy);
 
         for (uint256 i = 0; i < count; i++) {
             (uint64 bIndex, uint128 amount) = getUpdateAtIndex(i);
 
-            console.log("Update", i);
-            console.log("bIndex", bIndex);
-            console.log("amount", amount);
+            // console.log("Update", i);
+            // console.log("bIndex", bIndex);
+            // console.log("amount", amount);
 
             bytes32 rKey = recordKey(aIndex, bIndex);
             Record memory record = records[rKey];
@@ -172,8 +167,10 @@ contract StateBLS {
 
             // prepare msg & b's key for signature verification
             uint256[2] memory hash = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
-            console.log("Hash[0]", hash[0]);
-            console.log("Hash[1]", hash[1]);
+
+            // console.log("Hash[0]", hash[0]);
+            // console.log("Hash[1]", hash[1]);
+
             messages[i] = hash;
             messages[count + i] = hash; // for `a`
             publicKeys[i] = blsPublicKeys[bIndex];
@@ -209,15 +206,18 @@ contract StateBLS {
         for (uint256 i = 0; i < count; i++) {
             publicKeys[count + i] = aPublicKey;
         }
-        console.log("It's here1!");
+        // console.log("It's here1!");
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
         console.log(result, success, "It's here!");
+        
         if (!result || !success){
             revert();
         }
 
-        // emit update event
+        // FIXME: Only for measuring executation gas
+        gasRef = gasRef - gasleft() ;   
+        console.log("Gas consumed:", gasRef);
     }
 
     function correctUpdate() external {
