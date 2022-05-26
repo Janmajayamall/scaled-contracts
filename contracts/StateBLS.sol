@@ -33,7 +33,8 @@ contract StateBLS {
     uint256 reserves;
 
     bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
-    uint32 constant bufferPeriod = uint32(7 days);
+    uint32 constant bufferPeriod = uint32(1 days);
+
     // duration is a week in seconds
     uint32 constant duration = 604800;
 
@@ -126,8 +127,6 @@ contract StateBLS {
     //     // BLS signature or ECDSA signature?
     // }
 
-
-
     function post() external {
         // FIXME: Only for measuring executation gas
         uint gasRef = gasleft();
@@ -213,7 +212,7 @@ contract StateBLS {
         for (uint256 i = 0; i < count; i++) {
             publicKeys[count + i] = aPublicKey;
         }
-        // console.log("It's here1!");
+
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
         if (!result || !success){
@@ -244,7 +243,6 @@ contract StateBLS {
         ){
             revert();
         }
-
 
         // validate signature
         uint256[2] memory hash = msgHashBLS(aIndex, bIndex, newAmount, expiresBy, record.seqNo);

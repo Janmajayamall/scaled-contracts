@@ -13,9 +13,10 @@ import { arrayify } from "ethers/lib/utils";
 import { randomBytes } from "crypto";
 
 describe("Tesst1", function () {
+
 	interface Receipt {
 		aIndex: BigNumber;
-		bIndex: BigNumber;
+		bIndex: BigNumberz;
 		amount: BigNumber;
 		expiresBy: BigNumber;
 		seqNo: BigNumber;
@@ -167,10 +168,12 @@ describe("Tesst1", function () {
 		return Number(utils.formatEther(costWei)) * 1.25 * ethUSD;
 	}
 
+
+
 	it("Estimate cost", async function () {
+		
 		const blsSignerFactory = await BlsSignerFactory.new();
 		const users = await setUp(100, blsSignerFactory);
-
 		const Token = await ethers.getContractFactory(
 			"TestToken",
 			users[0].wallet

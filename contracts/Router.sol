@@ -35,6 +35,7 @@ contract Router {
         address token = StateBLS(_stateBls).token();
         IERC20(token).safeTransferFrom(msg.sender, _stateBls, uint256(amount));
 
-        StateBLS(_stateBls).depositSecurity(toIndex, amount);
+        
+        StateBLS(_stateBls).depositSecurity(toIndex);
     }
 }
