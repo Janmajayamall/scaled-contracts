@@ -159,15 +159,15 @@ describe("Tesst1", function () {
 			}
 		});
 
-		console.log("Gas Units:", gasUnits);
+		console.log("Calldata Gas Units:", gasUnits);
 
 		let costWei = BigNumber.from(gasUnits + 2100).mul(gasCostWei);
-		console.log("Cost Wei", costWei);
+		console.log("Calldata Cost Wei", costWei);
 
 		return Number(utils.formatEther(costWei)) * 1.25 * ethUSD;
 	}
 
-	it("Should work", async function () {
+	it("Estimate cost", async function () {
 		const blsSignerFactory = await BlsSignerFactory.new();
 		const users = await setUp(100, blsSignerFactory);
 
@@ -221,7 +221,5 @@ describe("Tesst1", function () {
 		console.log("OP L1 data cost in USD: ", calculateOPL1Cost(calldata));
 
 		await stateBLS.provider.call(prepareTransaction(stateBLS, calldata));
-
-		// // let d = stateBLS.interface.encodeFunctionData("post", [calldata]);
 	});
 });

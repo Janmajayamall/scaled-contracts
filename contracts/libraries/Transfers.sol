@@ -19,4 +19,14 @@ library Transfers {
         );
         require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "Transfer fail");
     }
+
+    function safeTransferFrom(
+        IERC20 token,
+        address from,
+        address to,
+        uint256 value
+    ) internal {
+        (bool success, bytes memory returnData) = address(token).call(abi.encodeWithSelector(token.transferFrom.selector, from, to, value));
+        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "TransferFrom fail");
+    }
 }

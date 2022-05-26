@@ -6,6 +6,7 @@ import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
 import "hardhat/console.sol";
 
+
 contract StateBLS {
 
     struct Account {
@@ -28,7 +29,7 @@ contract StateBLS {
 
     // FIXME: userCount is set to higher value for tests only   
     uint64 public userCount = 4294967296;
-    address immutable token;
+    address public immutable token;
     uint256 reserves;
 
     bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
@@ -73,6 +74,17 @@ contract StateBLS {
         }
     }
 
+    function msgHashBLS(
+        uint64 aIndex,
+        uint64 bIndex,
+        uint128 amount,
+        uint32 expiresBy,
+        uint16 seqNo
+    ) internal returns (uint256[2] memory) {
+        bytes memory message = abi.encodePacked(aIndex, bIndex, amount, expiresBy, seqNo);
+        return BLS.hashToPoint(blsDomain, message);
+    }
+
     function register(
         address userAddress,
         uint256[4] calldata pk
@@ -88,19 +100,8 @@ contract StateBLS {
         // console.log("Registerd user: ", userAddress, " at index:", userIndex);
     }
 
-    function msgHashBLS(
-        uint64 aIndex,
-        uint64 bIndex,
-        uint128 amount,
-        uint32 expiresBy,
-        uint16 seqNo
-    ) internal returns (uint256[2] memory) {
-        bytes memory message = abi.encodePacked(aIndex, bIndex, amount, expiresBy, seqNo);
-        return BLS.hashToPoint(blsDomain, message);
-    }
-
     function depositSecurity(uint64 toIndex) external {
-         // get amount deposited
+        //  get amount deposited
         uint256 balance = getTokenBalance(address(this));
         uint256 amount = balance - reserves;
         reserves = balance;
@@ -120,6 +121,12 @@ contract StateBLS {
         account.balance += uint128(amount);
         accounts[toIndex] = account;
     }
+
+    // function withdraw() external {
+    //     // BLS signature or ECDSA signature?
+    // }
+
+
 
     function post() external {
         // FIXME: Only for measuring executation gas
@@ -209,8 +216,6 @@ contract StateBLS {
         // console.log("It's here1!");
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
-        console.log(result, success, "It's here!");
-        
         if (!result || !success){
             revert();
         }
@@ -283,5 +288,6 @@ contract StateBLS {
         record.fixedAfter = uint32(block.timestamp + bufferPeriod);
         records[rKey] = record;
     }
+
 
 }

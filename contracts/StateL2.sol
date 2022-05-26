@@ -5,7 +5,8 @@ import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
 import "./../test/Console.sol";
 
-/// Optimizes heavily to reduce calldata
+/// Optimizes heavily to reduce calldata.
+/// Old implementation without BLS
 contract StateL2 {
     
     struct PartialReceipt {
