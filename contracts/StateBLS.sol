@@ -85,19 +85,52 @@ contract StateBLS {
         return BLS.hashToPoint(blsDomain, message);
     }
 
+    /// At `register` we need proof of possesion of bls public keys (i.e. `blsPk`)
+    ///
+    /// To understand why do we need it imagine the simplest possible scenario -
+    /// On `register` `b` registered their blsPk as pk_b (i.e. sk_b * g2)
+    /// and `a`, being dishonest, registered their blsPk as pk_a where pk_a = sk_a * g2 - pk_b.
+    /// Now `a` calls  `post()` fn with a single `receipt` that it shares with `b`.
+    /// To verify that both `a` and `b` have signed the `receipt` that `a` posted 
+    /// we need the following parameters
+    ///     sig_agg: Supplied by `a`
+    ///     pk_b & pk_a: Stored on-chain
+    /// To verify we check
+    ///     e(sig_agg, g2) == e(H, pk_b) * e (H, pk_a), where H = hash(receipt) * g1
+    /// Now, 
+    ///      Since, e(H, pk_b) * e (H, pk_a) =  e(H, pk_b + pk_a) AND pk_a = sk_a * g2 - pk_b
+    ///      => e(H, pk_b) * e (H, pk_a) = e(H, pk_b + sk_a * g2 - pk_b) = e(H, sk_a * g2)
+    /// This means,
+    ///      If `a` sets sig_agg = sk_a * H then following would hold true
+    ///         e(sig_agg, g2) = e(sk_a * H, g2) = e(H, sk_a * g2) = e(H, pk_b) * e (H, pk_a)
+    /// Thus, `receipt` is considered valid even when `b` didn't sign it. 
+    /// 
+    /// By forcing `a` to present a valid signature (proof of possesion) at register would avoid this, 
+    /// since it would mean that `a` holds a valid `sk_a` corresponding to `pk_a`. 
+    /// If they present pk_a and pk_a = sk_a1 * g2 - pk_b, there's no way for `a` to derive
+    /// `sk_a` thus they would fail to produce valid signature if this is the case.
     function register(
         address userAddress,
-        uint256[4] calldata pk
+        uint256[4] calldata blsPk,
+        uint256[2] calldata sk
     ) external {
         uint64 userIndex = userCount + 1;
         userCount = userIndex;
 
 
         addresses[userIndex] = userAddress;
-        blsPublicKeys[userIndex] = pk;
+        blsPublicKeys[userIndex] = blsPk;
 
-        // emit event
-        // console.log("Registerd user: ", userAddress, " at index:", userIndex);
+        // For proof of possesion user signs `userAddress`
+        bytes memory message = abi.encodePacked(userAddress);
+        uint256[2] memory hash = BLS.hashToPoint(blsDomain, message);
+
+        // validate bls signature `sk`
+        (bool valid, bool success) = BLS.verifySingle(sk, blsPk, hash);
+        if (!valid || !success){
+            revert();
+        }
+
     }
 
     function useless() external {

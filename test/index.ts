@@ -5,20 +5,8 @@ import {
   BlsSignerInterface,
 } from '@thehubbleproject/bls/dist/signer';
 import { ethers } from 'hardhat';
-import { solG1, solG2, aggregateRaw } from '@thehubbleproject/bls/dist/mcl';
-import {
-  BigNumber,
-  utils,
-  Transaction,
-  Contract,
-  Wallet,
-  Signer,
-} from 'ethers';
-import { TransactionRequest } from '@ethersproject/abstract-provider';
-import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
-import { arrayify } from 'ethers/lib/utils';
-import { randomBytes, sign } from 'crypto';
-import { rootCertificates } from 'tls';
+
+import { BigNumber, utils } from 'ethers';
 import {
   User,
   Receipt,
@@ -37,7 +25,7 @@ import {
   receiptHex,
 } from './hh/helpers';
 
-describe('Tesst1', function () {
+describe('Main tests', function () {
   // Imagine users[0] as `a` (i.e. the service provider)
   // with which rest of the users interact and pay overtime.
   // users[0] maintains a receipt with each of them and `post`s
@@ -128,5 +116,19 @@ describe('Tesst1', function () {
         assert(record['slashed'] == false);
       }
     }
+  });
+
+  it('should correct update', async function () {
+    let mainSigner = (await ethers.getSigners())[0];
+    const users = await setUpUsers(3, mainSigner);
+    const testToken = await deployToken(mainSigner);
+    const stateBLS = await deployStateBLS(testToken, mainSigner);
+
+    // normal setup
+    const fundAmount = BigNumber.from(
+      '340282366920938463463374607431768211455'
+    ); // max amount ~ 128 bits
+    await registerUsers(users, stateBLS);
+    await fundUsers(testToken, stateBLS, users, fundAmount, mainSigner);
   });
 });
