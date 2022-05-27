@@ -12,6 +12,7 @@ contract StateBLS {
     struct Account {
         uint128 balance;
         uint32 withdrawAfter;
+        uint32 nonce;
     }
 
     struct Record {
@@ -133,10 +134,6 @@ contract StateBLS {
 
     }
 
-    function useless() external {
-
-    }
-
     function depositSecurity(uint64 toIndex) external {
         //  get amount deposited
         uint256 balance = getTokenBalance(address(this));
@@ -159,9 +156,29 @@ contract StateBLS {
         accounts[toIndex] = account;
     }
 
-    // function withdraw() external {
-    //     // BLS signature or ECDSA signature?
-    // }
+    /// To withdraw user, with index `userIndex` and Account `account` signs the following
+    /// with their BLS pv key
+    ///     abi.encodePacked(account.nonce + 1, amount)
+    function withdraw(uint64 userIndex, uint128 amount, uint256[2] calldata sk) external {
+        Account memory account = accounts[userIndex];
+
+        // verify signature
+        uint256[2] memory hash = BLS.hashToPoint(blsDomain, abi.encodePacked(account.nonce + 1, amount));
+        (bool valid, bool success) = BLS.verifySingle(sk, blsPublicKeys[userIndex], hash);
+        if (!valid || !success){
+            revert();
+        }
+
+        if (account.withdrawAfter >= block.timestamp || account.balance < amount){
+            revert();
+        }
+
+        IERC20(token).transfer(addresses[userIndex], amount);
+        reserves -= amount;
+        account.balance -= amount;
+        account.nonce += 1;
+        accounts[userIndex] = account;
+    }
 
     /// Called by `a` to post all receipts that they share with 
     /// others (other `b`s) on-chain and reflect receipts amounts in respective
