@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {BLS} from "./libraries/BLS.sol";
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
 
 
 contract StateBLS {
@@ -324,6 +324,26 @@ contract StateBLS {
         uint64 bIndex;
 
         // TODO get the data from assembly
+        assembly {
+            newAmount := shr(128, calldataload(4))
+            expiresBy := shr(224, calldataload(20))
+
+            // signature
+            mstore(signature, calldataload(24))
+            mstore(add(signature, 32), calldataload(56))
+
+            aIndex := shr(192, calldataload(88))
+            bIndex := shr(192, calldataload(96))
+        }
+
+        console.log("Start");
+        console.log(newAmount);
+        console.log(expiresBy);
+        console.log(signature[0]);
+        console.log(signature[1]);
+        console.log(aIndex);
+        console.log(bIndex);
+        console.log("End");
 
         bytes32 rKey = recordKey(aIndex, bIndex);
         Record memory record = records[rKey];

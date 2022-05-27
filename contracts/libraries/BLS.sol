@@ -66,15 +66,16 @@ library BLS {
                 pubkey[2]
             ];
         uint256[1] memory out;
-        uint256 precompileGasCost =
-            BNPairingPrecompileCostEstimator(COST_ESTIMATOR_ADDRESS).getGasCost(
-                2
-            );
+        // TODO revert the comment below
+        // uint256 precompileGasCost =
+        //     BNPairingPrecompileCostEstimator(COST_ESTIMATOR_ADDRESS).getGasCost(
+        //         2
+        //     );
         bool callSuccess;
         // solium-disable-next-line security/no-inline-assembly
         assembly {
             callSuccess := staticcall(
-                precompileGasCost,
+                gas(),
                 8,
                 input,
                 384,

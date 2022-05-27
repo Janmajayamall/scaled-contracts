@@ -82,6 +82,32 @@ export function getUpdate(a: User, b: User, r: Receipt): Update {
     bSignature: b.blsSigner.sign(rHex),
   };
 }
+
+export function prepareCorrectUpdateCalldata(
+  update: Update,
+  fnSelector: Uint8Array
+): Uint8Array {
+  let sigs: solG1[] = [];
+  sigs.push(update.aSignature);
+  sigs.push(update.bSignature);
+  let aggSig = aggregate(sigs);
+
+  let calldata = new Uint8Array([
+    ...fnSelector,
+    ...utils.arrayify(utils.solidityPack(['uint128'], [update.receipt.amount])),
+    ...utils.arrayify(
+      utils.solidityPack(['uint32'], [update.receipt.expiresBy])
+    ),
+    ...utils.arrayify(
+      utils.solidityPack(['uint256', 'uint256'], [aggSig[0], aggSig[1]])
+    ),
+    ...utils.arrayify(utils.solidityPack(['uint64'], [update.receipt.aIndex])),
+    ...utils.arrayify(utils.solidityPack(['uint64'], [update.receipt.bIndex])),
+  ]);
+
+  return calldata;
+}
+
 /// Encodes updates in format required
 /// by `post()` fn
 export function preparePostCalldata(
@@ -171,9 +197,11 @@ export async function deployStateBLS(
 
 export async function registerUsers(users: Array<User>, stateBLS: Contract) {
   for (let i = 0; i < users.length; i++) {
+    let hash = utils.solidityPack(['address'], [users[i].wallet.address]);
+    let signature = users[i].blsSigner.sign(hash);
     await stateBLS
       .connect(users[i].wallet)
-      .register(users[i].wallet.address, users[i].blsSigner.pubkey);
+      .register(users[i].wallet.address, users[i].blsSigner.pubkey, signature);
   }
 }
 
@@ -205,8 +233,8 @@ export async function latestBlockWithdrawAfter(
   stateBLS: Contract
 ): Promise<number> {
   return (
-    (await ethers.provider.getBlock('latest')).timestamp +
-    (await stateBLS.bufferPeriod())
+    (await ethers.provider.getBlock(await ethers.provider.getBlockNumber()))
+      .timestamp + (await stateBLS.bufferPeriod())
   );
 }
 
