@@ -25,6 +25,7 @@ contract TestToken is IERC20 {
         symbol = symbol_;
         decimals = decimals_;
         manager = msg.sender;
+        _mint(msg.sender, type(uint256).max);
     }
 
     /// @notice Used for testing tokens with decimals that are not 18

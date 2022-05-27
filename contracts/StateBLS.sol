@@ -21,11 +21,11 @@ contract StateBLS {
         bool slashed;
     }
 
-    mapping (uint64 => address) addresses;
-    mapping (uint64 => uint256[4]) blsPublicKeys;
-    mapping (uint64 => Account) accounts;
-    mapping (bytes32 => Record) records;
-    mapping (uint64 => uint256) securityDeposits;
+    mapping (uint64 => address) public addresses;
+    mapping (uint64 => uint256[4]) public blsPublicKeys;
+    mapping (uint64 => Account) public accounts;
+    mapping (bytes32 => Record) public records;
+    mapping (uint64 => uint256) public securityDeposits;
 
     // FIXME: userCount is set to higher value for tests only   
     uint64 public userCount = 4294967296;
@@ -33,7 +33,7 @@ contract StateBLS {
     uint256 reserves;
 
     bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
-    uint32 constant bufferPeriod = uint32(1 days);
+    uint32 public constant bufferPeriod = uint32(1 days);
 
     // duration is a week in seconds
     uint32 constant duration = 604800;
@@ -47,8 +47,8 @@ contract StateBLS {
         return uint32(((block.timestamp / duration) + 1) * duration);
     }
 
-    function recordKey(uint64 a, uint64 b) internal returns (bytes32) {
-        return keccak256(abi.encode(a, "++", b));
+    function recordKey(uint64 a, uint64 b) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(a, "++", b));
     }
 
     function getTokenBalance(address user) internal view returns(uint256) {
@@ -116,7 +116,7 @@ contract StateBLS {
         uint256 amount = balance - reserves;
         reserves = balance;
 
-        // console.log("Funding account of user with address: ", addresses[toIndex]);
+        // console.log("Funding account of user with address: ", addresses[toIndex], "with amount", amount);
 
         Account memory account = accounts[toIndex];
         account.balance += uint128(amount);
@@ -127,6 +127,42 @@ contract StateBLS {
     //     // BLS signature or ECDSA signature?
     // }
 
+    /// Called by `a` to post all receipts that they share with 
+    /// others (other `b`s) on-chain and reflect receipts amounts in respective
+    /// accounts.
+    ///
+    /// Each receipt causes two accounts updates that is of `a` & `b`.
+    /// Since, a receipt represents how much `b` owes `a` it causes an 
+    /// increase in `a`'s acc balalnce and decrease in `b`'s account 
+    /// balance.
+    ///
+    /// Each receipt should have expiry set to `>= currentCycle`, otherwise 
+    /// it is considered expired & not valid anymore.
+    ///
+    /// Each receipt should be a follow on the previous receipt with `seqNo - 1`.
+    /// Note that it is `a`s and `b`s respobility to set their new receipt with
+    /// `seqNo + 1` where seqNo. = sequence of receipt that was settled on chain.
+    /// Once either of them sign a receipt with updated seqNo they confirm that 
+    /// previous receipt was posted on-chain correctly.
+    ///
+    /// Calldata:
+    ///     fnSelector (4 bytes)
+    ///     aIndex(8 bytes) - a's Index
+    ///     count (2 bytes) - No. of receipts 
+    ///     signature (64 bytes) - BLS aggregated signature on all receipts
+    ///     `each` receipt (24 bytes): {
+    ///         bIndex (8 bytes)
+    ///         amount (16 bytes)
+    ///     }
+    ///     
+    /// Calldata encoding
+    ///     <fnSelector + aIndex + count + signature + {bIndex + amount} for each receipt>       
+    ///
+    /// Note that we only need `bIndex` & `amount` to reconstruct a receipt because `aIndex`, 
+    /// `expiresBy` & `seqNo` can reproduced.
+    /// Moreover by aggregating (using BLS) all signatures on every receipt into one `signature` 
+    /// and storing blsPubKeys of users in contract storage we avoid needing any other info for receipt
+    /// validity verification.
     function post() external {
         // FIXME: Only for measuring executation gas
         uint gasRef = gasleft();
@@ -180,6 +216,8 @@ contract StateBLS {
             messages[i] = hash;
             messages[count + i] = hash; // for `a`
             publicKeys[i] = blsPublicKeys[bIndex];
+
+            // console.log(publicKeys[i][0], publicKeys[i][1], "B's public key");
             
             // update account
             Account memory bAccount = accounts[bIndex];
@@ -194,7 +232,7 @@ contract StateBLS {
                 record.slashed = false;
             }
             aAccount.balance += amount;
-
+            
             // `b` can only withdraw after buffer period, so that ample time is provided
             // for challange update.
             // Note we don't need buffer period for `a` since "challenge update" can only
@@ -215,6 +253,7 @@ contract StateBLS {
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
+        // console.log(result, success, "Er");
         if (!result || !success){
             revert();
         }
