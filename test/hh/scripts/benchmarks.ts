@@ -19,11 +19,13 @@ import { asL2Provider } from '@eth-optimism/sdk';
 const l2Url = 'https://mainnet.optimism.io';
 const providerL2 = asL2Provider(new ethers.providers.JsonRpcProvider(l2Url));
 
+const noOfReceipts = 200;
+
 /// To estimate how cost of calling `post()` function increases
 /// with no. of receipts.
 async function main() {
   let mainSigner = (await ethers.getSigners())[0];
-  const users = await setUpUsers(50, mainSigner);
+  const users = await setUpUsers(noOfReceipts + 1, mainSigner);
   const testToken = await deployToken(mainSigner);
   const stateBLS = await deployStateBLS(testToken, mainSigner);
 
@@ -81,6 +83,7 @@ async function main() {
   console.log(`L1 Gas Units: ${l1GasUnits}`);
   console.log(`L1 Gas price: ${l1GasPrice} Wei`);
   console.log(`L1 Gas cost: ${l1GasCost} Wei`);
+  console.log(`L2 Gas Units: ${l2GasUnits}`);
   console.log(`L2 Gas cost: ${l2GasCost} Wei`);
   console.log(`Total: ${l2GasCost.add(l1GasCost)} Wei`);
 }
