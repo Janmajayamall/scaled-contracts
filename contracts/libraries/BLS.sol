@@ -5,7 +5,7 @@ import { ModexpInverse, ModexpSqrt } from "./ModExp.sol";
 import {
     BNPairingPrecompileCostEstimator
 } from "./BNPairingPrecompileCostEstimator.sol";
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 
 /**
     @title  Boneh–Lynn–Shacham (BLS) signature scheme on Barreto-Naehrig 254 bit curve (BN-254)

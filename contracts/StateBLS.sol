@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {BLS} from "./libraries/BLS.sol";
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 
 
 contract StateBLS {
@@ -27,8 +27,7 @@ contract StateBLS {
     mapping (bytes32 => Record) public records;
     mapping (uint64 => uint256) public securityDeposits;
 
-    // FIXME: userCount is set to higher value for tests only   
-    uint64 public userCount = 4294967296;
+    uint64 public userCount = 0;
     address public immutable token;
     uint256 reserves;
 
@@ -93,12 +92,16 @@ contract StateBLS {
         uint64 userIndex = userCount + 1;
         userCount = userIndex;
 
-        // get y of blsPk
+
         addresses[userIndex] = userAddress;
         blsPublicKeys[userIndex] = pk;
 
         // emit event
         // console.log("Registerd user: ", userAddress, " at index:", userIndex);
+    }
+
+    function useless() external {
+
     }
 
     function depositSecurity(uint64 toIndex) external {
@@ -165,7 +168,7 @@ contract StateBLS {
     /// validity verification.
     function post() external {
         // FIXME: Only for measuring executation gas
-        uint gasRef = gasleft();
+        // uint gasRef = gasleft();
 
         uint64 aIndex;
         uint16 count;
@@ -259,8 +262,8 @@ contract StateBLS {
         }
 
         // FIXME: Only for measuring executation gas
-        gasRef = gasRef - gasleft() ;   
-        console.log("Gas consumed:", gasRef);
+        // gasRef = gasRef - gasleft() ;   
+        // console.log("Gas consumed:", gasRef);
     }
 
     function correctUpdate() external {
