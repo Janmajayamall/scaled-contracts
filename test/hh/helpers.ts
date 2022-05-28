@@ -111,12 +111,13 @@ export function prepareCorrectUpdateCalldata(
 /// Encodes updates in format required
 /// by `post()` fn
 export function preparePostCalldata(
+  postNonceSig: solG1,
   updates: Array<Update>,
   aIndex: BigNumber,
   fnSelector: Uint8Array
 ): Uint8Array {
   // aggregate signatures
-  let sigs: solG1[] = [];
+  let sigs: solG1[] = [postNonceSig];
   updates.forEach((u) => {
     sigs.push(u.aSignature);
     sigs.push(u.bSignature);

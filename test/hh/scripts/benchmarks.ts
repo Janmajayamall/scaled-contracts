@@ -15,6 +15,7 @@ import {
   preparePostCalldata,
 } from '../helpers';
 import { asL2Provider } from '@eth-optimism/sdk';
+import { util } from 'chai';
 
 const l2Url = 'https://mainnet.optimism.io';
 const providerL2 = asL2Provider(new ethers.providers.JsonRpcProvider(l2Url));
@@ -55,7 +56,11 @@ async function main() {
     }
   });
 
+  let postNonceSig = users[0].blsSigner.sign(
+    utils.solidityPack(['uint32'], [1])
+  );
   const calldata = preparePostCalldata(
+    postNonceSig,
     updates,
     users[0].index,
     utils.arrayify(stateBLS.interface.getSighash('post()'))

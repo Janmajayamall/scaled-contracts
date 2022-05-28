@@ -17,7 +17,6 @@ import {
   prepareTransaction,
   latestBlockWithdrawAfter,
   recordKey,
-  receiptHex,
   prepareCorrectUpdateCalldata,
 } from './hh/helpers';
 
@@ -60,7 +59,13 @@ describe('Main tests', function () {
       }
     });
 
+    // calling `post()`.
+    // Note users[0] latest post nonce is 0 right now
+    const postNonceSig = users[0].blsSigner.sign(
+      utils.solidityPack(['uint32'], [1])
+    );
     const calldata = preparePostCalldata(
+      postNonceSig,
       updates,
       users[0].index,
       utils.arrayify(stateBLS.interface.getSighash('post()'))
@@ -78,7 +83,7 @@ describe('Main tests', function () {
 
     const wAfter = await latestBlockWithdrawAfter(stateBLS);
 
-    // check user balances
+    // check user accounts
     for (let i = 0; i < users.length; i++) {
       let account = await stateBLS.accounts(users[i].index);
 
@@ -86,17 +91,14 @@ describe('Main tests', function () {
         // users[0] balance should `totalAmount`
         assert(totalAmount.eq(account['balance']));
 
-        // withdrawAfter should be zero for users[0]
-        // since they are `a`
-        assert(account['withdrawAfter'] == 0);
+        // users[0] postNonce should be 1
+        assert(account['postNonce'] == 1);
       } else {
         // users[i] balance should be `fundAmount-updates[i].r.amount`
         assert(
           account['balance'].eq(fundAmount.sub(updates[i - 1].receipt.amount))
         );
-
-        // withdrawAfter should be
-        assert(account['withdrawAfter'] == wAfter);
+        assert(account['postNonce'] == 0);
       }
     }
 
@@ -104,16 +106,13 @@ describe('Main tests', function () {
     for (let i = 0; i < users.length; i++) {
       if (i != 0) {
         let rKey = recordKey(users[0].index, users[i].index);
-        let record = await stateBLS.records(rKey);
-
-        assert(record['amount'].eq(updates[i - 1].receipt.amount));
-        assert(record['seqNo'] == 1);
-        assert(record['fixedAfter'] == wAfter);
-        assert(record['slashed'] == false);
+        let seqNo = await stateBLS.records(rKey);
+        assert(seqNo == 1);
       }
     }
   });
 
+  /// ******** Not necessary anymore **********
   /// Consider we have 3 users - users[0] (`a`), users[1] (`b`), users[2] (`b1`)
   /// a posts the receipt that it shares with b & b1, but cheats by posting not the
   /// latest receipt that is shares by `b`.
@@ -127,74 +126,74 @@ describe('Main tests', function () {
   /// an old receipt ~ by posting old receipt first & then calling `correctUpdate()`.
   /// To avoid this, before slashing, we always check whether `b` has been slashed for a receipt with same
   /// seq before shared with same `a`.
-  it('should correct update', async function () {
-    let mainSigner = (await ethers.getSigners())[0];
-    // only three users. users[0] is `a`
-    const users = await setUpUsers(3, mainSigner);
-    const testToken = await deployToken(mainSigner);
-    const stateBLS = await deployStateBLS(testToken, mainSigner);
+  // it('should correct update', async function () {
+  //   let mainSigner = (await ethers.getSigners())[0];
+  //   // only three users. users[0] is `a`
+  //   const users = await setUpUsers(3, mainSigner);
+  //   const testToken = await deployToken(mainSigner);
+  //   const stateBLS = await deployStateBLS(testToken, mainSigner);
 
-    // This is cycle we target after which all receipts
-    // expire
-    const currentCycle = await stateBLS.currentCycleExpiry();
+  //   // This is cycle we target after which all receipts
+  //   // expire
+  //   const currentCycle = await stateBLS.currentCycleExpiry();
 
-    // normal setup
-    const fundAmount = BigNumber.from(
-      '340282366920938463463374607431768211455'
-    ); // max amount ~ 128 bits
-    await registerUsers(users, stateBLS);
-    await fundUsers(testToken, stateBLS, users, fundAmount, mainSigner);
+  //   // normal setup
+  //   const fundAmount = BigNumber.from(
+  //     '340282366920938463463374607431768211455'
+  //   ); // max amount ~ 128 bits
+  //   await registerUsers(users, stateBLS);
+  //   await fundUsers(testToken, stateBLS, users, fundAmount, mainSigner);
 
-    // post updates
-    let updates: Array<Update> = [];
-    users.forEach((u, index) => {
-      // since users[0] is `a` it can't have a receipt
-      // with themselves
-      if (index != 0) {
-        let r: Receipt = {
-          aIndex: users[0].index,
-          bIndex: u.index,
-          amount: BigNumber.from(1000),
-          expiresBy: BigNumber.from(currentCycle),
-          seqNo: BigNumber.from(1),
-        };
-        updates.push(getUpdate(users[0], u, r));
-      }
-    });
-    let calldata = preparePostCalldata(
-      updates,
-      users[0].index,
-      utils.arrayify(stateBLS.interface.getSighash('post()'))
-    );
-    await users[0].wallet.sendTransaction(
-      prepareTransaction(stateBLS, calldata)
-    );
+  //   // post updates
+  //   let updates: Array<Update> = [];
+  //   users.forEach((u, index) => {
+  //     // since users[0] is `a` it can't have a receipt
+  //     // with themselves
+  //     if (index != 0) {
+  //       let r: Receipt = {
+  //         aIndex: users[0].index,
+  //         bIndex: u.index,
+  //         amount: BigNumber.from(1000),
+  //         expiresBy: BigNumber.from(currentCycle),
+  //         seqNo: BigNumber.from(1),
+  //       };
+  //       updates.push(getUpdate(users[0], u, r));
+  //     }
+  //   });
+  //   let calldata = preparePostCalldata(
+  //     updates,
+  //     users[0].index,
+  //     utils.arrayify(stateBLS.interface.getSighash('post()'))
+  //   );
+  //   await users[0].wallet.sendTransaction(
+  //     prepareTransaction(stateBLS, calldata)
+  //   );
 
-    // prepare the latest receipt between users[0] & users[1] with amount greater than 1000
-    let correctUpdate = getUpdate(users[0], users[1], {
-      aIndex: users[0].index,
-      bIndex: users[1].index,
-      // Note latest receipt for a `seqNo` is the receipt that has the highest amount
-      amount: BigNumber.from(1001),
-      expiresBy: BigNumber.from(currentCycle),
-      seqNo: BigNumber.from(1),
-    });
+  //   // prepare the latest receipt between users[0] & users[1] with amount greater than 1000
+  //   let correctUpdate = getUpdate(users[0], users[1], {
+  //     aIndex: users[0].index,
+  //     bIndex: users[1].index,
+  //     // Note latest receipt for a `seqNo` is the receipt that has the highest amount
+  //     amount: BigNumber.from(1001),
+  //     expiresBy: BigNumber.from(currentCycle),
+  //     seqNo: BigNumber.from(1),
+  //   });
 
-    calldata = prepareCorrectUpdateCalldata(
-      correctUpdate,
-      utils.arrayify(stateBLS.interface.getSighash('correctUpdate()'))
-    );
-    await users[0].wallet.sendTransaction(
-      prepareTransaction(stateBLS, calldata)
-    );
+  //   calldata = prepareCorrectUpdateCalldata(
+  //     correctUpdate,
+  //     utils.arrayify(stateBLS.interface.getSighash('correctUpdate()'))
+  //   );
+  //   await users[0].wallet.sendTransaction(
+  //     prepareTransaction(stateBLS, calldata)
+  //   );
 
-    // account balance of users[0] should be now 2000 + 1, since amount diff in
-    // latest receipt is of only 1
-    let account = await stateBLS.accounts(users[0].index);
-    assert(account['balance'].eq(BigNumber.from(2001)));
+  //   // account balance of users[0] should be now 2000 + 1, since amount diff in
+  //   // latest receipt is of only 1
+  //   let account = await stateBLS.accounts(users[0].index);
+  //   assert(account['balance'].eq(BigNumber.from(2001)));
 
-    // account balance of users[1] should be `fundAmount - 1001`
-    account = await stateBLS.accounts(users[1].index);
-    assert(account['balance'].eq(fundAmount.sub(BigNumber.from(1001))));
-  });
+  //   // account balance of users[1] should be `fundAmount - 1001`
+  //   account = await stateBLS.accounts(users[1].index);
+  //   assert(account['balance'].eq(fundAmount.sub(BigNumber.from(1001))));
+  // });
 });

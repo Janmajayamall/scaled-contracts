@@ -4,22 +4,24 @@ pragma solidity ^0.8.13;
 import {BLS} from "./libraries/BLS.sol";
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 
 
 contract StateBLS {
 
     struct Account {
         uint128 balance;
-        uint32 withdrawAfter;
         uint32 nonce;
+        uint32 postNonce;
     }
 
     struct Record {
-        uint128 amount;
         uint16 seqNo;
-        uint32 fixedAfter;
-        bool slashed;
+    }
+
+    struct Withdrawal {
+        uint128 amount;
+        uint32 validAfter;
     }
 
     mapping (uint64 => address) public addresses;
@@ -27,6 +29,8 @@ contract StateBLS {
     mapping (uint64 => Account) public accounts;
     mapping (bytes32 => Record) public records;
     mapping (uint64 => uint256) public securityDeposits;
+
+    mapping (uint64 => Withdrawal) public pendingWithdrawals;
 
     uint64 public userCount = 0;
     address public immutable token;
@@ -156,29 +160,46 @@ contract StateBLS {
         accounts[toIndex] = account;
     }
 
-    /// To withdraw user, with index `userIndex` and Account `account` signs the following
-    /// with their BLS pv key
+    /// To initialise withdrawal process user with index `userIndex` and Account `account` signs the following
+    /// message with their BLS pv key
     ///     abi.encodePacked(account.nonce + 1, amount)
-    function withdraw(uint64 userIndex, uint128 amount, uint256[2] calldata sk) external {
-        Account memory account = accounts[userIndex];
-
+    /// Note that a pending withdrawal can be overriden by calling `initWithdraw` with with latest `nonce` but
+    /// with different amount
+    function initWithdraw(uint64 userIndex, uint128 amount, uint256[2] calldata sk) external {
         // verify signature
-        uint256[2] memory hash = BLS.hashToPoint(blsDomain, abi.encodePacked(account.nonce + 1, amount));
+        uint256[2] memory hash = BLS.hashToPoint(blsDomain, abi.encodePacked(accounts[userIndex].nonce + 1, amount));
         (bool valid, bool success) = BLS.verifySingle(sk, blsPublicKeys[userIndex], hash);
         if (!valid || !success){
             revert();
         }
 
-        if (account.withdrawAfter >= block.timestamp || account.balance < amount){
+        pendingWithdrawals[userIndex] = Withdrawal ({ 
+            amount: amount,
+            validAfter: uint32(block.timestamp) + bufferPeriod
+        });
+    }
+
+    /// Finishes pending withdrawal and increases account nonce by 1
+    function processWithdrawal(uint64 userIndex) external {
+        Withdrawal memory withdrawal = pendingWithdrawals[userIndex];
+        Account memory account = accounts[userIndex];
+
+        if (
+            withdrawal.validAfter >= block.timestamp ||
+            account.balance < withdrawal.amount
+        ){
             revert();
         }
 
-        IERC20(token).transfer(addresses[userIndex], amount);
-        reserves -= amount;
-        account.balance -= amount;
+        // transfer amount
+        IERC20(token).transfer(addresses[userIndex], withdrawal.amount);
+        
+        // update account
+        account.balance -= withdrawal.amount;
         account.nonce += 1;
         accounts[userIndex] = account;
     }
+
 
     /// Called by `a` to post all receipts that they share with 
     /// others (other `b`s) on-chain and reflect receipts amounts in respective
@@ -186,7 +207,7 @@ contract StateBLS {
     ///
     /// Each receipt causes two accounts updates that is of `a` & `b`.
     /// Since, a receipt represents how much `b` owes `a` it causes an 
-    /// increase in `a`'s acc balalnce and decrease in `b`'s account 
+    /// increase in `a`'s acc balance and decrease in `b`'s account 
     /// balance.
     ///
     /// Each receipt should have expiry set to `>= currentCycle`, otherwise 
@@ -197,6 +218,9 @@ contract StateBLS {
     /// `seqNo + 1` where seqNo. = sequence of receipt that was settled on chain.
     /// Once either of them sign a receipt with updated seqNo they confirm that 
     /// previous receipt was posted on-chain correctly.
+    ///
+    /// Aggregated BLS signature (i.e. signature) also includes a's signature on 
+    /// their latest `postNonce + 1`.
     ///
     /// Calldata:
     ///     fnSelector (4 bytes)
@@ -241,8 +265,8 @@ contract StateBLS {
 
         Account memory aAccount = accounts[aIndex];
         
-        uint256[4][] memory publicKeys = new uint256[4][](count * 2);
-        uint256[2][] memory messages = new uint256[2][](count * 2);
+        uint256[4][] memory publicKeys = new uint256[4][]((count * 2) + 1);
+        uint256[2][] memory messages = new uint256[2][]((count * 2) + 1);
 
         uint32 expiresBy = currentCycleExpiry();
         // console.log("currentCycleExpiry:" ,expiresBy);
@@ -254,14 +278,12 @@ contract StateBLS {
             // console.log("bIndex", bIndex);
             // console.log("amount", amount);
 
+            // prepare msg & b's key for signature verification
             bytes32 rKey = recordKey(aIndex, bIndex);
             Record memory record = records[rKey];
-            record.amount = amount;
-            record.fixedAfter = uint32(block.timestamp + bufferPeriod);
             record.seqNo += 1;
-
-            // prepare msg & b's key for signature verification
             uint256[2] memory hash = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
+            records[rKey] = record;
 
             // console.log("Hash[0]", hash[0]);
             // console.log("Hash[1]", hash[1]);
@@ -279,10 +301,8 @@ contract StateBLS {
                 bAccount.balance = 0;
                 // slash `b`
                 securityDeposits[bIndex] = 0;
-                record.slashed = true;
             }else {
                 bAccount.balance -= amount;
-                record.slashed = false;
             }
             aAccount.balance += amount;
             
@@ -290,19 +310,23 @@ contract StateBLS {
             // for challange update.
             // Note we don't need buffer period for `a` since "challenge update" can only
             // increase their balance, not decrease.
-            bAccount.withdrawAfter = uint32(block.timestamp + bufferPeriod);
             accounts[bIndex] = bAccount;
-
-            records[rKey] = record;
         }
-
-        accounts[aIndex] = aAccount;
 
         // fill in publicKeys for `a`
         uint256[4] memory aPublicKey = blsPublicKeys[aIndex];
         for (uint256 i = 0; i < count; i++) {
             publicKeys[count + i] = aPublicKey;
         }
+
+        // add signature verification for `postNonce`
+        aAccount.postNonce += 1;
+        uint256[2] memory pHash = BLS.hashToPoint(blsDomain, abi.encodePacked(aAccount.postNonce));
+        messages[count * 2] = pHash;
+        publicKeys[count * 2] = aPublicKey;
+
+        // update account
+        accounts[aIndex] = aAccount;
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
@@ -316,88 +340,91 @@ contract StateBLS {
         // console.log("Gas consumed:", gasRef);
     }
 
-    function correctUpdate() external {
-        uint128 newAmount;
-        uint32 expiresBy;
-        uint256[2] memory signature;
-        uint64 aIndex;
-        uint64 bIndex;
+    /// With addition of `postNonce` and differentiation between
+    /// role of `a` and `b` correct update is not more necessary
+    ///
+    // function correctUpdate() external {
+    //     uint128 newAmount;
+    //     uint32 expiresBy;
+    //     uint256[2] memory signature;
+    //     uint64 aIndex;
+    //     uint64 bIndex;
 
-        // TODO get the data from assembly
-        assembly {
-            newAmount := shr(128, calldataload(4))
-            expiresBy := shr(224, calldataload(20))
+    //     // TODO get the data from assembly
+    //     assembly {
+    //         newAmount := shr(128, calldataload(4))
+    //         expiresBy := shr(224, calldataload(20))
 
-            // signature
-            mstore(signature, calldataload(24))
-            mstore(add(signature, 32), calldataload(56))
+    //         // signature
+    //         mstore(signature, calldataload(24))
+    //         mstore(add(signature, 32), calldataload(56))
 
-            aIndex := shr(192, calldataload(88))
-            bIndex := shr(192, calldataload(96))
-        }
+    //         aIndex := shr(192, calldataload(88))
+    //         bIndex := shr(192, calldataload(96))
+    //     }
 
-        console.log("Start");
-        console.log(newAmount);
-        console.log(expiresBy);
-        console.log(signature[0]);
-        console.log(signature[1]);
-        console.log(aIndex);
-        console.log(bIndex);
-        console.log("End");
+    //     // console.log("Start");
+    //     // console.log(newAmount);
+    //     // console.log(expiresBy);
+    //     // console.log(signature[0]);
+    //     // console.log(signature[1]);
+    //     // console.log(aIndex);
+    //     // console.log(bIndex);
+    //     // console.log("End");
 
-        bytes32 rKey = recordKey(aIndex, bIndex);
-        Record memory record = records[rKey];
+    //     bytes32 rKey = recordKey(aIndex, bIndex);
+    //     Record memory record = records[rKey];
 
-        if (
-            record.amount >= newAmount ||
-            record.fixedAfter <= block.timestamp ||
-            expiresBy % duration != 0 
-        ){
-            revert();
-        }
+    //     if (
+    //         record.amount >= newAmount ||
+    //         record.fixedAfter <= block.timestamp ||
+    //         expiresBy % duration != 0 
+    //     ){
+    //         revert();
+    //     }
 
-        // validate signature
-        uint256[2] memory hash = msgHashBLS(aIndex, bIndex, newAmount, expiresBy, record.seqNo);
-        // FIXME aggregate public keys into one
-        uint256[4][] memory publicKeys = new uint256[4][](2);
-        publicKeys[0] = blsPublicKeys[aIndex];
-        publicKeys[1] = blsPublicKeys[bIndex];
-        uint256[2][] memory messages = new uint256[2][](2);
-        messages[0] = hash;
-        messages[1] = hash;
-        (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
-        if (!result || !success){
-            revert();
-        }
+    //     // validate signature
+    //     uint256[2] memory hash = msgHashBLS(aIndex, bIndex, newAmount, expiresBy, record.seqNo);
+    //     // FIXME aggregate public keys into one
+    //     uint256[4][] memory publicKeys = new uint256[4][](2);
+    //     publicKeys[0] = blsPublicKeys[aIndex];
+    //     publicKeys[1] = blsPublicKeys[bIndex];
+    //     uint256[2][] memory messages = new uint256[2][](2);
+    //     messages[0] = hash;
+    //     messages[1] = hash;
+    //     (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
+    //     if (!result || !success){
+    //         revert();
+    //     }
 
-        // update accounts
-        uint128 amountDiff = newAmount - record.amount;
-        record.amount = newAmount;
-        Account memory bAccount = accounts[bIndex];
-        if (bAccount.balance < amountDiff){
-            // slash `b` only if they were not
-            // slashed for `seqNo` before
-            if (!record.slashed){
-                record.slashed = true;
-                securityDeposits[bIndex] = 0;
-            }
+    //     // update accounts
+    //     uint128 amountDiff = newAmount - record.amount;
+    //     record.amount = newAmount;
+    //     Account memory bAccount = accounts[bIndex];
+    //     if (bAccount.balance < amountDiff){
+    //         // slash `b` only if they were not
+    //         // slashed for `seqNo` before
+    //         if (!record.slashed){
+    //             record.slashed = true;
+    //             securityDeposits[bIndex] = 0;
+    //         }
 
-            amountDiff = bAccount.balance;
-            bAccount.balance = 0;
-        }else {
-            bAccount.balance -= amountDiff;
-        }
-        bAccount.withdrawAfter = uint32(block.timestamp) + bufferPeriod;
-        accounts[bIndex] = bAccount;
+    //         amountDiff = bAccount.balance;
+    //         bAccount.balance = 0;
+    //     }else {
+    //         bAccount.balance -= amountDiff;
+    //     }
 
-        Account memory aAccount = accounts[aIndex];
-        aAccount.balance += amountDiff;
-        accounts[aIndex] = aAccount;
+    //     accounts[bIndex] = bAccount;
 
-        // update record
-        record.fixedAfter = uint32(block.timestamp + bufferPeriod);
-        records[rKey] = record;
-    }
+    //     Account memory aAccount = accounts[aIndex];
+    //     aAccount.balance += amountDiff;
+    //     accounts[aIndex] = aAccount;
+
+    //     // update record
+    //     record.fixedAfter = uint32(block.timestamp + bufferPeriod);
+    //     records[rKey] = record;
+    // }
 
 
 }
