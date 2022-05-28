@@ -12,30 +12,30 @@ contract Router {
 
     address stateBls;
 
-    // function fundAccount(uint64 toIndex, uint128 amount) external {
-    //     address _stateBls = stateBls;
-    //     if (_stateBls == address(0)){
-    //         revert();
-    //     }
+    function fundAccount(uint64 toIndex, uint128 amount) external {
+        address _stateBls = stateBls;
+        if (_stateBls == address(0)){
+            revert();
+        }
 
-    //     // transfer amount
-    //     address token = StateBLS(_stateBls).token();
-    //     IERC20(token).safeTransferFrom(msg.sender, _stateBls, uint256(amount));
+        // transfer amount
+        address token = StateBLS(_stateBls).token();
+        IERC20(token).safeTransferFrom(msg.sender, _stateBls, uint256(amount));
 
-    //     StateBLS(_stateBls).fundAccount(toIndex);
-    // }
+        StateBLS(_stateBls).fundAccount(toIndex);
+    }
 
-    // function depositSecurity(uint64 toIndex, uint128 amount) external {
-    //     address _stateBls = stateBls;
-    //     if (_stateBls == address(0)){
-    //         revert();
-    //     }
+    function depositSecurity(uint64 toIndex, uint128 amount) external {
+        address _stateBls = stateBls;
+        if (_stateBls == address(0)){
+            revert();
+        }
 
-    //     // transfer amount
-    //     address token = StateBLS(_stateBls).token();
-    //     IERC20(token).safeTransferFrom(msg.sender, _stateBls, uint256(amount));
+        // transfer amount
+        address token = StateBLS(_stateBls).token();
+        IERC20(token).safeTransferFrom(msg.sender, _stateBls, uint256(amount));
 
         
-    //     StateBLS(_stateBls).depositSecurity(toIndex);
-    // }
+        StateBLS(_stateBls).depositSecurity(toIndex);
+    }
 }

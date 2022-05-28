@@ -165,10 +165,10 @@ contract StateBLS {
     ///     abi.encodePacked(account.nonce + 1, amount)
     /// Note that a pending withdrawal can be overriden by calling `initWithdraw` with with latest `nonce` but
     /// with different amount
-    function initWithdraw(uint64 userIndex, uint128 amount, uint256[2] calldata sk) external {
+    function initWithdraw(uint64 userIndex, uint128 amount, uint256[2] calldata signature) external {
         // verify signature
         uint256[2] memory hash = BLS.hashToPoint(blsDomain, abi.encodePacked(accounts[userIndex].nonce + 1, amount));
-        (bool valid, bool success) = BLS.verifySingle(sk, blsPublicKeys[userIndex], hash);
+        (bool valid, bool success) = BLS.verifySingle(signature, blsPublicKeys[userIndex], hash);
         if (!valid || !success){
             revert();
         }
@@ -198,6 +198,11 @@ contract StateBLS {
         account.balance -= withdrawal.amount;
         account.nonce += 1;
         accounts[userIndex] = account;
+
+        pendingWithdrawals[userIndex] = Withdrawal({
+            validAfter:0,
+            amount:0
+        });
     }
 
 
@@ -341,7 +346,7 @@ contract StateBLS {
     }
 
     /// With addition of `postNonce` and differentiation between
-    /// role of `a` and `b` correct update is not more necessary
+    /// role of `a` and `b` `correctUpdate` is no more necessary
     ///
     // function correctUpdate() external {
     //     uint128 newAmount;

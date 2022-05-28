@@ -1,7 +1,7 @@
 import { assert, expect, use, util } from 'chai';
 import { ethers } from 'hardhat';
 
-import { BigNumber, utils } from 'ethers';
+import { BigNumber, Contract, Signer, utils } from 'ethers';
 import {
   User,
   Receipt,
@@ -21,23 +21,27 @@ import {
 } from './hh/helpers';
 
 describe('Main tests', function () {
+  let mainSigner: Signer;
+  let users: User[];
+  let testToken: Contract;
+  let stateBLS: Contract;
+  const fundAmount = BigNumber.from('340282366920938463463374607431768211455'); // max amount ~ 128 bits
+
+  beforeEach(async () => {
+    mainSigner = (await ethers.getSigners())[0];
+    users = await setUpUsers(2, mainSigner);
+    testToken = await deployToken(mainSigner);
+    stateBLS = await deployStateBLS(testToken, mainSigner);
+
+    await registerUsers(users, stateBLS);
+    await fundUsers(testToken, stateBLS, users, fundAmount, mainSigner);
+  });
+
   // Imagine users[0] as `a` (i.e. the service provider)
   // with which rest of the users interact and pay overtime.
   // users[0] maintains a receipt with each of them and `post`s
   // them on-chain once in a while.
   it('should settle', async function () {
-    let mainSigner = (await ethers.getSigners())[0];
-    const users = await setUpUsers(3, mainSigner);
-    const testToken = await deployToken(mainSigner);
-    const stateBLS = await deployStateBLS(testToken, mainSigner);
-
-    // normal setup
-    const fundAmount = BigNumber.from(
-      '340282366920938463463374607431768211455'
-    ); // max amount ~ 128 bits
-    await registerUsers(users, stateBLS);
-    await fundUsers(testToken, stateBLS, users, fundAmount, mainSigner);
-
     // This is cycle we target after which all receipts
     // expire
     const currentCycle = await stateBLS.currentCycleExpiry();
@@ -81,8 +85,6 @@ describe('Main tests', function () {
       totalAmount = totalAmount.add(u.receipt.amount);
     });
 
-    const wAfter = await latestBlockWithdrawAfter(stateBLS);
-
     // check user accounts
     for (let i = 0; i < users.length; i++) {
       let account = await stateBLS.accounts(users[i].index);
@@ -110,6 +112,131 @@ describe('Main tests', function () {
         assert(seqNo == 1);
       }
     }
+  });
+
+  describe('Tests withdrawals', function () {
+    let receipt: Receipt;
+    let update: Update;
+
+    // 86400 seconds is buffer period (i.e. 1 day)
+    const bufferPeriod = 86400;
+
+    beforeEach(async () => {
+      let payAmount = BigNumber.from('10000');
+      receipt = {
+        aIndex: users[0].index,
+        bIndex: users[1].index,
+        amount: payAmount,
+        expiresBy: await stateBLS.currentCycleExpiry(),
+        seqNo: BigNumber.from(1),
+      };
+
+      update = getUpdate(users[0], users[1], receipt);
+
+      let calldata = preparePostCalldata(
+        users[0].blsSigner.sign(utils.solidityPack(['uint32'], [1])),
+        [update],
+        users[0].index,
+        utils.arrayify(stateBLS.interface.getSighash('post()'))
+      );
+      await users[0].wallet.sendTransaction(
+        prepareTransaction(stateBLS, calldata)
+      );
+    });
+
+    async function initWithdrawal(
+      user: User,
+      nonce: Number,
+      wAmount: BigNumber
+    ) {
+      // init withdrawal
+      await stateBLS
+        .connect(user.wallet)
+        .initWithdraw(
+          user.index,
+          wAmount,
+          user.blsSigner.sign(
+            utils.solidityPack(['uint32', 'uint128'], [nonce, wAmount])
+          )
+        );
+    }
+
+    it('Should allow b to withdraw amount `fundAmount` - `receipt.amount` after buffer period', async function () {
+      let wAmount = fundAmount.sub(receipt.amount);
+      await initWithdrawal(users[1], 1, wAmount);
+
+      const timestamp = (await ethers.provider.getBlock('latest')).timestamp;
+
+      // check withdrawal
+      let pWithdrawal = await stateBLS.pendingWithdrawals(users[1].index);
+      assert(pWithdrawal['validAfter'] == timestamp + bufferPeriod);
+      assert(pWithdrawal['amount'].eq(wAmount));
+
+      // set time to validAfter to process withdrawal
+      await ethers.provider.send('evm_setNextBlockTimestamp', [
+        pWithdrawal['validAfter'],
+      ]);
+
+      // process withdrawal
+      await stateBLS.connect(users[1].wallet).processWithdrawal(users[1].index);
+
+      // check that account reflects withdrawal
+      let account = await stateBLS.accounts(users[1].index);
+      assert(account['balance'].eq(BigNumber.from(0)));
+      assert(account['nonce'] == 1);
+
+      // check pending withdrawal is removed
+      pWithdrawal = await stateBLS.pendingWithdrawals(users[1].index);
+      assert(pWithdrawal['validAfter'] == 0);
+      assert(pWithdrawal['amount'].eq(BigNumber.from(0)));
+    });
+
+    it('Should fail to process withdraw of amount `fundAmount` - `receipt.amount` + 1 after buffer period', async function () {
+      let wAmount = fundAmount.sub(receipt.amount).add(BigNumber.from(1));
+      await initWithdrawal(users[1], 1, wAmount);
+
+      const timestamp = (await ethers.provider.getBlock('latest')).timestamp;
+      // set time to validAfter to process withdrawal
+      await ethers.provider.send('evm_setNextBlockTimestamp', [
+        timestamp + bufferPeriod,
+      ]);
+
+      await expect(
+        stateBLS.connect(users[1].wallet).processWithdrawal(users[1].index)
+      ).to.be.reverted;
+    });
+
+    it('Should fail to process withdraw before `validAfter`', async function () {
+      let wAmount = fundAmount.sub(receipt.amount);
+      await initWithdrawal(users[1], 1, wAmount);
+
+      const timestamp = (await ethers.provider.getBlock('latest')).timestamp;
+      // set time to validAfter to process withdrawal
+      await ethers.provider.send('evm_setNextBlockTimestamp', [
+        timestamp + bufferPeriod - 2,
+      ]);
+
+      await expect(
+        stateBLS.connect(users[1].wallet).processWithdrawal(users[1].index)
+      ).to.be.reverted;
+    });
+
+    it('Should fail to initiate withdrawal with invalid nonce', async function () {
+      // we try initiating withdrawal process with invalid nonce as 0
+      let wAmount = BigNumber.from(100000);
+      // init withdrawal
+      await expect(
+        stateBLS
+          .connect(users[1].wallet)
+          .initWithdraw(
+            users[1].index,
+            wAmount,
+            users[1].blsSigner.sign(
+              utils.solidityPack(['uint32', 'uint128'], [0, wAmount])
+            )
+          )
+      ).to.be.reverted;
+    });
   });
 
   /// ******** Not necessary anymore **********

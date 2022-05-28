@@ -12,6 +12,8 @@ An alternative to BLS version is using SMT (to maintain Account tree that stores
 
 Scaled started as a necessary component for [DSE](https://github.com/Janmajayamall/dse). It aims to be usable as a plugin payment layer by DSE as well as other such applications ~ incentivised p2p CDNs, file transfer, etc.
 
+Typescript package for interacting with Scaled contracts is available [here](https://github.com/Janmajayamall/scaled-ts)
+
 ## Results
 
 Table below shows approximate (not the worst case) cost of calling `post()` fn in `StateBLS` contract to settle `no. of receipts`.
