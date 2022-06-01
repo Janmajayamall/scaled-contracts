@@ -10,7 +10,7 @@ contract Router {
 
     using Transfers for IERC20;
 
-    address stateBls;
+    address public stateBls;
 
     function fundAccount(uint64 toIndex, uint128 amount) external {
         address _stateBls = stateBls;

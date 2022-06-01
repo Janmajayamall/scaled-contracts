@@ -32,7 +32,7 @@ contract StateBLS {
 
     mapping (uint64 => Withdrawal) public pendingWithdrawals;
 
-    uint64 public userCount = 0;
+    uint64 public userCount;
     address public immutable token;
     uint256 reserves;
 
@@ -135,7 +135,6 @@ contract StateBLS {
         if (!valid || !success){
             revert();
         }
-
     }
 
     function depositSecurity(uint64 toIndex) external {
@@ -224,9 +223,17 @@ contract StateBLS {
     /// Once either of them sign a receipt with updated seqNo they confirm that 
     /// previous receipt was posted on-chain correctly.
     ///
-    /// Aggregated BLS signature (i.e. signature) also includes a's signature on 
-    /// their latest `postNonce + 1`.
-    ///
+    /// Aggregated BLS signature (i.e. signature) includes (a) signatures of `b`s 
+    /// on their receipt that they share with `a` (b) a's signature on latest
+    /// `commitmentData`. We do not check `a`'s signature on receipts, since they 
+    /// sign hash of `commitmentData`
+    /// commitmentData = {
+    ///     bytes memory commitmentData
+    ///     for r in receipts {
+    ///               commitmentData = bytes.concat(commitmentData, r.bIndex, r.amount, r.seqNo)
+    ///     }
+    /// }
+    /// 
     /// Calldata:
     ///     fnSelector (4 bytes)
     ///     aIndex(8 bytes) - a's Index
@@ -242,6 +249,7 @@ contract StateBLS {
     ///
     /// Note that we only need `bIndex` & `amount` to reconstruct a receipt because `aIndex`, 
     /// `expiresBy` & `seqNo` can reproduced.
+    ///
     /// Moreover by aggregating (using BLS) all signatures on every receipt into one `signature` 
     /// and storing blsPubKeys of users in contract storage we avoid needing any other info for receipt
     /// validity verification.
@@ -270,11 +278,13 @@ contract StateBLS {
 
         Account memory aAccount = accounts[aIndex];
         
-        uint256[4][] memory publicKeys = new uint256[4][]((count * 2) + 1);
-        uint256[2][] memory messages = new uint256[2][]((count * 2) + 1);
+        uint256[4][] memory publicKeys = new uint256[4][]((count) + 1);
+        uint256[2][] memory messages = new uint256[2][]((count) + 1);
 
         uint32 expiresBy = currentCycleExpiry();
         // console.log("currentCycleExpiry:" ,expiresBy);
+
+        bytes memory commitmentData;
 
         for (uint256 i = 0; i < count; i++) {
             (uint64 bIndex, uint128 amount) = getUpdateAtIndex(i);
@@ -283,19 +293,19 @@ contract StateBLS {
             // console.log("bIndex", bIndex);
             // console.log("amount", amount);
 
-            // prepare msg & b's key for signature verification
+            // prepare msg hash & b's key for signature verification
             bytes32 rKey = recordKey(aIndex, bIndex);
             Record memory record = records[rKey];
             record.seqNo += 1;
-            uint256[2] memory hash = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
+            messages[i] = msgHashBLS(aIndex, bIndex, amount, expiresBy, record.seqNo);
+            publicKeys[i] = blsPublicKeys[bIndex];
+            commitmentData = bytes.concat(commitmentData, abi.encodePacked(bIndex, amount, record.seqNo));
+
+            // update record
             records[rKey] = record;
 
             // console.log("Hash[0]", hash[0]);
             // console.log("Hash[1]", hash[1]);
-
-            messages[i] = hash;
-            messages[count + i] = hash; // for `a`
-            publicKeys[i] = blsPublicKeys[bIndex];
 
             // console.log(publicKeys[i][0], publicKeys[i][1], "B's public key");
             
@@ -310,28 +320,16 @@ contract StateBLS {
                 bAccount.balance -= amount;
             }
             aAccount.balance += amount;
-            
-            // `b` can only withdraw after buffer period, so that ample time is provided
-            // for challange update.
-            // Note we don't need buffer period for `a` since "challenge update" can only
-            // increase their balance, not decrease.
             accounts[bIndex] = bAccount;
         }
 
-        // fill in publicKeys for `a`
-        uint256[4] memory aPublicKey = blsPublicKeys[aIndex];
-        for (uint256 i = 0; i < count; i++) {
-            publicKeys[count + i] = aPublicKey;
-        }
-
-        // add signature verification for `postNonce`
-        aAccount.postNonce += 1;
-        uint256[2] memory pHash = BLS.hashToPoint(blsDomain, abi.encodePacked(aAccount.postNonce));
-        messages[count * 2] = pHash;
-        publicKeys[count * 2] = aPublicKey;
-
         // update account
         accounts[aIndex] = aAccount;
+
+        // add signature verification for `commitmentData`
+        uint256[2] memory pHash = BLS.hashToPoint(blsDomain, commitmentData);
+        messages[count + 1] = pHash;
+        publicKeys[count + 1] = blsPublicKeys[aIndex];
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);

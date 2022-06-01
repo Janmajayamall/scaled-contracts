@@ -15,9 +15,7 @@ import {
   getUpdate,
   preparePostCalldata,
   prepareTransaction,
-  latestBlockWithdrawAfter,
   recordKey,
-  prepareCorrectUpdateCalldata,
 } from './hh/helpers';
 
 describe('Main tests', function () {
