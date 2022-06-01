@@ -12,7 +12,6 @@ contract StateBLS {
     struct Account {
         uint128 balance;
         uint32 nonce;
-        uint32 postNonce;
     }
 
     struct Record {
@@ -343,7 +342,7 @@ contract StateBLS {
         // console.log("Gas consumed:", gasRef);
     }
 
-    /// With addition of `postNonce` and differentiation between
+    /// With addition of `commitmentData` and differentiation between
     /// role of `a` and `b` `correctUpdate` is no more necessary
     ///
     // function correctUpdate() external {
