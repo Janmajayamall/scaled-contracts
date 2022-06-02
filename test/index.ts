@@ -16,6 +16,7 @@ import {
   preparePostCalldata,
   prepareTransaction,
   recordKey,
+  commitUpdates,
 } from './hh/helpers';
 
 describe('Main tests', function () {
@@ -27,7 +28,7 @@ describe('Main tests', function () {
 
   beforeEach(async () => {
     mainSigner = (await ethers.getSigners())[0];
-    users = await setUpUsers(2, mainSigner);
+    users = await setUpUsers(21, mainSigner);
     testToken = await deployToken(mainSigner);
     stateBLS = await deployStateBLS(testToken, mainSigner);
 
@@ -63,11 +64,9 @@ describe('Main tests', function () {
 
     // calling `post()`.
     // Note users[0] latest post nonce is 0 right now
-    const postNonceSig = users[0].blsSigner.sign(
-      utils.solidityPack(['uint32'], [1])
-    );
+    const commitSig = commitUpdates(users[0], updates);
     const calldata = preparePostCalldata(
-      postNonceSig,
+      commitSig,
       updates,
       users[0].index,
       utils.arrayify(stateBLS.interface.getSighash('post()'))
@@ -90,15 +89,11 @@ describe('Main tests', function () {
       if (i == 0) {
         // users[0] balance should `totalAmount`
         assert(totalAmount.eq(account['balance']));
-
-        // users[0] postNonce should be 1
-        assert(account['postNonce'] == 1);
       } else {
         // users[i] balance should be `fundAmount-updates[i].r.amount`
         assert(
           account['balance'].eq(fundAmount.sub(updates[i - 1].receipt.amount))
         );
-        assert(account['postNonce'] == 0);
       }
     }
 
@@ -113,6 +108,7 @@ describe('Main tests', function () {
   });
 
   describe('Tests withdrawals', function () {
+    return;
     let receipt: Receipt;
     let update: Update;
 

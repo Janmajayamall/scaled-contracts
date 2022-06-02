@@ -10,6 +10,7 @@ import { Provider, TransactionRequest } from '@ethersproject/abstract-provider';
 import { arrayify } from 'ethers/lib/utils';
 import { randomBytes, Sign, sign } from 'crypto';
 import { signer } from '@thehubbleproject/bls';
+import { util } from 'chai';
 
 export interface Receipt {
   aIndex: BigNumber;
@@ -83,6 +84,23 @@ export function getUpdate(a: User, b: User, r: Receipt): Update {
   };
 }
 
+/// Get commitment on updates where user is `a`
+export function commitUpdates(user: User, updates: Update[]): solG1 {
+  let commit: Uint8Array = new Uint8Array([]);
+  updates.forEach((u) => {
+    commit = new Uint8Array([
+      ...commit,
+      ...utils.arrayify(
+        utils.solidityPack(
+          ['uint64', 'uint128', 'uint16'],
+          [u.receipt.bIndex, u.receipt.amount, u.receipt.seqNo]
+        )
+      ),
+    ]);
+  });
+  return user.blsSigner.sign(utils.hexlify(commit));
+}
+
 export function prepareCorrectUpdateCalldata(
   update: Update,
   fnSelector: Uint8Array
@@ -111,15 +129,14 @@ export function prepareCorrectUpdateCalldata(
 /// Encodes updates in format required
 /// by `post()` fn
 export function preparePostCalldata(
-  postNonceSig: solG1,
+  commitSig: solG1,
   updates: Array<Update>,
   aIndex: BigNumber,
   fnSelector: Uint8Array
 ): Uint8Array {
   // aggregate signatures
-  let sigs: solG1[] = [postNonceSig];
+  let sigs: solG1[] = [commitSig];
   updates.forEach((u) => {
-    sigs.push(u.aSignature);
     sigs.push(u.bSignature);
   });
   let aggSig = aggregate(sigs);

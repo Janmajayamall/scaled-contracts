@@ -277,8 +277,8 @@ contract StateBLS {
 
         Account memory aAccount = accounts[aIndex];
         
-        uint256[4][] memory publicKeys = new uint256[4][]((count) + 1);
-        uint256[2][] memory messages = new uint256[2][]((count) + 1);
+        uint256[4][] memory publicKeys = new uint256[4][](count + 1);
+        uint256[2][] memory messages = new uint256[2][](count + 1);
 
         uint32 expiresBy = currentCycleExpiry();
         // console.log("currentCycleExpiry:" ,expiresBy);
@@ -302,11 +302,6 @@ contract StateBLS {
 
             // update record
             records[rKey] = record;
-
-            // console.log("Hash[0]", hash[0]);
-            // console.log("Hash[1]", hash[1]);
-
-            // console.log(publicKeys[i][0], publicKeys[i][1], "B's public key");
             
             // update account
             Account memory bAccount = accounts[bIndex];
@@ -326,9 +321,8 @@ contract StateBLS {
         accounts[aIndex] = aAccount;
 
         // add signature verification for `commitmentData`
-        uint256[2] memory pHash = BLS.hashToPoint(blsDomain, commitmentData);
-        messages[count + 1] = pHash;
-        publicKeys[count + 1] = blsPublicKeys[aIndex];
+        messages[count] = BLS.hashToPoint(blsDomain, commitmentData);
+        publicKeys[count] = blsPublicKeys[aIndex];
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
