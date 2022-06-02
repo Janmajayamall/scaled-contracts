@@ -13,6 +13,7 @@ import {
   getRandomBN,
   getUpdate,
   preparePostCalldata,
+  commitUpdates,
 } from '../helpers';
 import { asL2Provider } from '@eth-optimism/sdk';
 import { util } from 'chai';
@@ -20,7 +21,7 @@ import { util } from 'chai';
 const l2Url = 'https://mainnet.optimism.io';
 const providerL2 = asL2Provider(new ethers.providers.JsonRpcProvider(l2Url));
 
-const noOfReceipts = 200;
+const noOfReceipts = 10;
 
 /// To estimate how cost of calling `post()` function increases
 /// with no. of receipts.
@@ -56,11 +57,9 @@ async function main() {
     }
   });
 
-  let postNonceSig = users[0].blsSigner.sign(
-    utils.solidityPack(['uint32'], [1])
-  );
+  const commitSig = commitUpdates(users[0], updates);
   const calldata = preparePostCalldata(
-    postNonceSig,
+    commitSig,
     updates,
     users[0].index,
     utils.arrayify(stateBLS.interface.getSighash('post()'))
@@ -71,7 +70,7 @@ async function main() {
     to: stateBLS.address,
     value: 0,
   });
-  console.log(tx, ' tx');
+  // console.log(tx, ' tx')
 
   // send the tx
   const res = await users[0].wallet.sendTransaction(tx);
