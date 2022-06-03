@@ -6,6 +6,8 @@ import "ds-test/test.sol";
 import "./../contracts/StateL2.sol";
 import "./TestToken.sol";
 import "./utils/Console.sol";
+import {BlsUtils} from "./utils/BlsUtils.sol";
+import {Vm} from "./utils/Vm.sol";
 
 contract StateL2Test is DSTest {
 
@@ -25,6 +27,7 @@ contract StateL2Test is DSTest {
 
     struct User {
         uint256 pvKey;
+        address addr;
     }
 
     // `a` is the service provider.
@@ -33,10 +36,14 @@ contract StateL2Test is DSTest {
     uint256 aPvKey = 0x084154b85f5eec02a721fcfe220e4e871a2c35593c2a46292ad53b8f793c8360;
     address aAddress;
 
+    Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
     // users are service requesters
     uint256[] usersPvKey;
     address[] usersAddress;
 
+    User[] users;
+ 
     StateL2 stateL2;
     TestToken token;
     
@@ -51,25 +58,25 @@ contract StateL2Test is DSTest {
     uint256 optimismL1GasPrice = 45;
 
     function setUsers(uint256 count) internal {
-        aAddress = vm.addr(aPvKey);
-        string[] memory scriptArgs = new string[](1);
-        scriptArgs[0] =  "./test/hh/scripts/pv_key.sh";
         for (uint256 i = 0; i < count; i++) {
-            bytes memory raw = vm.ffi(scriptArgs);
-            uint256 pvKey = uint256(bytes32(raw));
-            usersPvKey.push(pvKey);
-        }
+            BlsUtils.genUser();
+            // uint256 secret = BlsUtils.genSecret("32");  
 
-        // set addresses
-        for (uint256 i = 0; i < usersPvKey.length; i++) {
-            usersAddress.push(vm.addr(usersPvKey[i]));
+            // console.log(secret, "secret");
+            // BlsUtils.blsPubKey(secret);
+
+
+            // User memory u = User({
+            //     pvKey: secret,
+            //     addr: vm.addr(secret)
+            // });
+            // users.push(u);
         }
     }
 
 
     function setUp() public {
-        // runU();
-        // setUsers(usersCount);
+        setUsers(usersCount);
 
         // token = new TestToken(
         //     "TestToken",
@@ -100,6 +107,10 @@ contract StateL2Test is DSTest {
         for (uint64 i = 0; i < usersAddress.length; i++) {
             console.log(usersAddress[i], "'s balance: ", stateL2.getAccount(i + 2).balance);
         }
+    }
+
+    function registerUser(User memory user) internal {
+
     }
 
     function registerUsers() internal {

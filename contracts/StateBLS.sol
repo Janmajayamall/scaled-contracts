@@ -40,6 +40,7 @@ contract StateBLS {
 
     // duration is a week in seconds
     uint32 constant duration = 604800;
+    
 
     constructor(address _token) {
         token = _token;
