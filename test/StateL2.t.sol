@@ -3,10 +3,9 @@
 pragma solidity ^0.8.13;
 
 import "ds-test/test.sol";
-import "./../src/StateL2.sol";
+import "./../contracts/StateL2.sol";
 import "./TestToken.sol";
-import "./Vm.sol";
-import "./Console.sol";
+import "./utils/Console.sol";
 
 contract StateL2Test is DSTest {
 
@@ -24,6 +23,10 @@ contract StateL2Test is DSTest {
         bytes bSignature;
     }
 
+    struct User {
+        uint256 pvKey;
+    }
+
     // `a` is the service provider.
     // We assume that `a` is the one agggregating all receipts
     // and posting them onchain.
@@ -36,7 +39,7 @@ contract StateL2Test is DSTest {
 
     StateL2 stateL2;
     TestToken token;
-    Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+    
 
     // Configs
     uint256 usersCount = 1;
@@ -50,7 +53,7 @@ contract StateL2Test is DSTest {
     function setUsers(uint256 count) internal {
         aAddress = vm.addr(aPvKey);
         string[] memory scriptArgs = new string[](1);
-        scriptArgs[0] =  "./pv_key.sh";
+        scriptArgs[0] =  "./test/hh/scripts/pv_key.sh";
         for (uint256 i = 0; i < count; i++) {
             bytes memory raw = vm.ffi(scriptArgs);
             uint256 pvKey = uint256(bytes32(raw));
@@ -63,18 +66,20 @@ contract StateL2Test is DSTest {
         }
     }
 
+
     function setUp() public {
-        setUsers(usersCount);
+        // runU();
+        // setUsers(usersCount);
 
-        token = new TestToken(
-            "TestToken",
-            "TT",
-            18
-        );
+        // token = new TestToken(
+        //     "TestToken",
+        //     "TT",
+        //     18
+        // );
 
-        // mint tokens to `this`
-        token.mint(address(this), type(uint256).max);
-        stateL2 = new StateL2(address(token));
+        // // mint tokens to `this`
+        // token.mint(address(this), type(uint256).max);
+        // stateL2 = new StateL2(address(token));
     }
 
     function receiptHash(Receipt memory receipt) internal view returns (bytes32) {
@@ -156,48 +161,48 @@ contract StateL2Test is DSTest {
     }
 
     function test1() public {
-        registerUsers();
-        fundAccounts();
+        // registerUsers();
+        // fundAccounts();
 
-        printBalances();
+        // printBalances();
         
-        Update[] memory updates = new Update[](usersAddress.length);
-        for (uint64 i = 0; i < usersAddress.length; i++) {
-            // receipts
-            Receipt memory r = Receipt({
-                aIndex: 1,
-                bIndex: i + 2,
-                amount: dummyCharge,
-                seqNo: 1,
-                expiresBy: stateL2.currentCycleExpiry()
-            });
-            bytes32 rHash = receiptHash(r);
+        // Update[] memory updates = new Update[](usersAddress.length);
+        // for (uint64 i = 0; i < usersAddress.length; i++) {
+        //     // receipts
+        //     Receipt memory r = Receipt({
+        //         aIndex: 1,
+        //         bIndex: i + 2,
+        //         amount: dummyCharge,
+        //         seqNo: 1,
+        //         expiresBy: stateL2.currentCycleExpiry()
+        //     });
+        //     bytes32 rHash = receiptHash(r);
             
-            Update memory u = Update ({
-                receipt: r,
-                aSignature: signMsg(rHash, aPvKey),
-                bSignature: signMsg(rHash, usersPvKey[i])
-            });
+        //     Update memory u = Update ({
+        //         receipt: r,
+        //         aSignature: signMsg(rHash, aPvKey),
+        //         bSignature: signMsg(rHash, usersPvKey[i])
+        //     });
 
-            updates[i] = u;
-        }
+        //     updates[i] = u;
+        // }
 
-        bytes memory callD = genPostCalldata(updates);
-        // l1 data cost
-        optimismL1Cost(callD);
+        // bytes memory callD = genPostCalldata(updates);
+        // // l1 data cost
+        // optimismL1Cost(callD);
 
-        uint256 gasL;
-        assembly {
-            gasL := gas()
-        }
-        (bool success, ) = address(stateL2).call(callD);
-        assembly {
-            gasL := sub(gasL, gas())
-        }
-        console.log("Execution gas units:", gasL);
-        assert(success);
+        // uint256 gasL;
+        // assembly {
+        //     gasL := gas()
+        // }
+        // (bool success, ) = address(stateL2).call(callD);
+        // assembly {
+        //     gasL := sub(gasL, gas())
+        // }
+        // console.log("Execution gas units:", gasL);
+        // assert(success);
 
-        printBalances();
+        // printBalances();
     }
 
 }

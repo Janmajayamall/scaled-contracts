@@ -16,7 +16,6 @@ import {
   commitUpdates,
 } from '../helpers';
 import { asL2Provider } from '@eth-optimism/sdk';
-import { util } from 'chai';
 
 const l2Url = 'https://mainnet.optimism.io';
 const providerL2 = asL2Provider(new ethers.providers.JsonRpcProvider(l2Url));

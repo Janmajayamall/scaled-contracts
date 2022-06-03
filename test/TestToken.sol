@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pragma solidity ^0.8.0;
 
-import "../interfaces/IERC20.sol";
+import "../contracts/interfaces/IERC20.sol";
 
 contract TestToken is IERC20 {
     mapping(address => uint256) private _balances;
