@@ -42,7 +42,6 @@ library BlsUtils {
         scriptArgs[1] = "./test/hh/scripts/solidity-test.js";
         scriptArgs[2] = "genUser";
         bytes memory res = vm.ffi(scriptArgs); 
-        console.logBytes(res);
 
         assembly {
             pvKey := mload(add(res, 32))

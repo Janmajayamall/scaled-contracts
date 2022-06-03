@@ -33,36 +33,23 @@ contract StateL2Test is DSTest {
         uint64 index;
     }
 
-    // `a` is the service provider.
-    // We assume that `a` is the one agggregating all receipts
-    // and posting them onchain.
-    uint256 aPvKey = 0x084154b85f5eec02a721fcfe220e4e871a2c35593c2a46292ad53b8f793c8360;
-    address aAddress;
-
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
-    // users are service requesters
-    uint256[] usersPvKey;
-    address[] usersAddress;
+    bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
 
     User[] users;
-    bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
- 
-    StateL2 stateL2;
+    
     StateBLS stateBls;
     TestToken token;
-    
 
     // Configs
-    uint256 usersCount = 2;
     uint128 fundAmount = 10000 * 10 ** 18;
-    // amount = 3899.791821921342121326
-    uint128 dummyCharge = 3899791821921342121326;
 
     // https://public-grafana.optimism.io/d/9hkhMxn7z/public-dashboard?orgId=1&refresh=5m
     uint256 optimismL1GasPrice = 45;
 
     function setUsers(uint256 count) internal {
+        // users = new User[](0);
         for (uint256 i = 0; i < count; i++) {
             uint256 pvKey;
             uint256[4] memory blsPubKey;
@@ -78,28 +65,15 @@ contract StateL2Test is DSTest {
                 index: 0
             });
             
-            users.push(u);
+            // if user does not exist then push, otherwise replace
+            if (users.length <= i) {
+                users.push(u);
+            }else {
+                users[i] = u;
+            }
         }
-    }
 
-    function registerUser(User memory user) internal {
-
-    }
-
-    function setUp() public {
-        setUsers(usersCount);
-
-        token = new TestToken(
-            "TestToken",
-            "TT",
-            18
-        );
-
-
-        stateBls = new StateBLS(address(token));
-
-        registerUsers();
-        fundUsers(fundAmount);
+        console.log(users.length, "User length");
     }
 
     function receiptHash(Receipt memory receipt) internal view returns (bytes32) {
@@ -115,10 +89,12 @@ contract StateL2Test is DSTest {
             );
     }
 
-    function printBalances() internal view {
-        console.log("a's balance: ", stateL2.getAccount(1).balance);
-        for (uint64 i = 0; i < usersAddress.length; i++) {
-            console.log(usersAddress[i], "'s balance: ", stateL2.getAccount(i + 2).balance);
+    function printAccountBalances() internal view {
+        for (uint i = 0; i < users.length; i++) {
+            User memory u = users[i];
+            (uint128 balance, ) = stateBls.accounts(u.index);
+            console.log(u.index, "'s balance: ", balance);
+
         }
     }
 
@@ -181,6 +157,8 @@ contract StateL2Test is DSTest {
         data = abi.encodePacked(r.aIndex, r.bIndex, r.amount, r.expiresBy, r.seqNo);
     }
 
+    /// aggregates a's commitmentData signature and all `b`s signature on
+    /// receipt that they share with `a` into one. 
     function aggregateSignaturesForPost(uint256[2] memory commitSignature, Update[] memory updates) internal returns (uint256[2] memory aggSig) {
         uint256[2][] memory signatures = new uint256[2][](updates.length + 1);
         signatures[0] = commitSignature;
@@ -191,23 +169,56 @@ contract StateL2Test is DSTest {
         aggSig = BlsUtils.aggregateSignatures(signatures);
     }
 
-    function testPost() public {
+    function setUp() public {
+        token = new TestToken(
+            "TestToken",
+            "TT",
+            18
+        );
+        stateBls = new StateBLS(address(token));
+    }
+
+    function testPost(uint128[11] memory balances, uint128[11] memory amounts) public {
+        uint256 usersCount = 11;
+
+        setUsers(usersCount);
+        registerUsers();
+
+        // fund users
+        for (uint256 i = 0; i < users.length; i++) {
+            // skip funding aUser (i.e. users[0])
+            if (i != 0){
+                fundUser(users[i], balances[i]);
+            }
+        }
+
+        // printAccountBalances();
+
         Update[] memory updates = new Update[](users.length - 1);
         User memory aUser = users[0];
         uint32 currentCycleExpiry = stateBls.currentCycleExpiry();
+
+        uint256 totalAmount; // totalAmount that `a` receives - should not exceed uint128 
+
         for (uint64 i = 1; i < users.length; i++) {
+            uint128 amount;
+            if (balances[i] != 0){
+                amount = amounts[i] % balances[i];
+            }
+            
+            totalAmount += uint256(amount);
+
             // create receipt
             Receipt memory r = Receipt({
                 aIndex: aUser.index,
                 bIndex: users[i].index,
-                amount: dummyCharge,
+                amount: amount,
                 seqNo: 1,
                 expiresBy: currentCycleExpiry
             });
 
             // `b` signs the receipt
             bytes memory _receiptBlob = receiptBlob(r);
-            
             
             Update memory u = Update ({
                 receipt: r,
@@ -217,6 +228,11 @@ contract StateL2Test is DSTest {
 
             updates[i-1] = u;
         }
+
+        // if totalAmount > uint128.max then discard
+        vm.assume(totalAmount <= type(uint128).max);
+        vm.assume(totalAmount <= uint256(340282366920938463463374607431768211455));
+        console.log(totalAmount, " total Amount");
 
         // `a` commits to data
         bytes memory commitBlob = updateCommitmentBlob(updates);
@@ -229,9 +245,13 @@ contract StateL2Test is DSTest {
 
         // generate post() calldata
         bytes memory _calldata = postFnCalldata(aUser.index, aggSig, updates);
-
+        // console.log
         (bool success,) = address(stateBls).call(_calldata);
         assert(success);
+
+        // printAccountBalances();
+
+        // printAccountBalances();
 
         // bytes memory callD = genPostCalldata(updates);
         // // l1 data cost
