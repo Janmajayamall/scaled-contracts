@@ -4,9 +4,11 @@ pragma solidity ^0.8.13;
 
 import "ds-test/test.sol";
 import "./../contracts/StateL2.sol";
+import "./../contracts/StateBLS.sol";
 import "./TestToken.sol";
 import "./utils/Console.sol";
 import {BlsUtils} from "./utils/BlsUtils.sol";
+import {BLS} from "./../contracts/libraries/BLS.sol";
 import {Vm} from "./utils/Vm.sol";
 
 contract StateL2Test is DSTest {
@@ -21,13 +23,14 @@ contract StateL2Test is DSTest {
 
     struct Update {
         Receipt receipt;
-        bytes aSignature;
-        bytes bSignature;
+        uint256[2] bSignature;
     }
 
     struct User {
         uint256 pvKey;
+        uint256[4] blsPubKey;
         address addr;
+        uint64 index;
     }
 
     // `a` is the service provider.
@@ -43,14 +46,16 @@ contract StateL2Test is DSTest {
     address[] usersAddress;
 
     User[] users;
+    bytes32 constant blsDomain = keccak256(abi.encodePacked("test"));
  
     StateL2 stateL2;
+    StateBLS stateBls;
     TestToken token;
     
 
     // Configs
-    uint256 usersCount = 1;
-    uint256 intialFunding = 10000 * 10 ** 18;
+    uint256 usersCount = 2;
+    uint128 fundAmount = 10000 * 10 ** 18;
     // amount = 3899.791821921342121326
     uint128 dummyCharge = 3899791821921342121326;
 
@@ -59,34 +64,42 @@ contract StateL2Test is DSTest {
 
     function setUsers(uint256 count) internal {
         for (uint256 i = 0; i < count; i++) {
-            BlsUtils.genUser();
-            // uint256 secret = BlsUtils.genSecret("32");  
+            uint256 pvKey;
+            uint256[4] memory blsPubKey;
+            (pvKey, blsPubKey) = BlsUtils.genUser();
 
             // console.log(secret, "secret");
             // BlsUtils.blsPubKey(secret);
 
-
-            // User memory u = User({
-            //     pvKey: secret,
-            //     addr: vm.addr(secret)
-            // });
-            // users.push(u);
+            User memory u = User({
+                pvKey: pvKey,
+                blsPubKey: blsPubKey,
+                addr: vm.addr(pvKey),
+                index: 0
+            });
+            
+            users.push(u);
         }
     }
 
+    function registerUser(User memory user) internal {
+
+    }
 
     function setUp() public {
         setUsers(usersCount);
 
-        // token = new TestToken(
-        //     "TestToken",
-        //     "TT",
-        //     18
-        // );
+        token = new TestToken(
+            "TestToken",
+            "TT",
+            18
+        );
 
-        // // mint tokens to `this`
-        // token.mint(address(this), type(uint256).max);
-        // stateL2 = new StateL2(address(token));
+
+        stateBls = new StateBLS(address(token));
+
+        registerUsers();
+        fundUsers(fundAmount);
     }
 
     function receiptHash(Receipt memory receipt) internal view returns (bytes32) {
@@ -109,94 +122,116 @@ contract StateL2Test is DSTest {
         }
     }
 
-    function registerUser(User memory user) internal {
-
-    }
-
     function registerUsers() internal {
-        stateL2.register(aAddress);
-        for (uint256 i = 0; i < usersAddress.length; i++) {
-            stateL2.register(usersAddress[i]);
+        for (uint256 i = 0; i < users.length; i++) {
+            // sign address
+            User memory user = users[i];
+            bytes memory _msg = abi.encodePacked(user.addr);
+            uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, _msg);
+            stateBls.register(user.addr, user.blsPubKey, sig);  
+
+            // get user's index
+            users[i].index = stateBls.userCount();
         }
     }
 
-    function fundAccount(uint64 index, uint256 amount) internal {
-        // transfer token to `state`
-        token.transfer(address(stateL2), amount);
-        
-        // fund `to`'s account in `state`
-        stateL2.fundAccount(index);
+    function fundUser(User memory user, uint128 amount) internal {
+        token.transfer(address(stateBls), amount);        
+        stateBls.fundAccount(user.index);
     }
 
-    function fundAccounts() internal {
-        // a's account
-        fundAccount(1, intialFunding);
-        for (uint64 index = 0; index < usersAddress.length; index++) {
-            fundAccount(index + 2, intialFunding);
+    function fundUsers(uint128 amount) internal {
+        for (uint256 i = 0; i < users.length; i++) {
+            fundUser(users[i], amount);
         }
     }
-
-    function signMsg(bytes32 msgHash, uint256 pvKey) internal returns (bytes memory signature){
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pvKey, msgHash);
-        signature = abi.encodePacked(r, s, v);
-    }
-
-    function genPostCalldata(Update[] memory updates) internal returns (bytes memory data){
+    
+    /// Returns calldata for `post()` fn. All receipts
+    /// should have `receipt.aIndex` set as `aIndex`.
+    /// `aCommitSignature` is a's signature on `commitmentData`
+    /// committing to all `updates`
+    function postFnCalldata(uint64 aIndex, uint256[2] memory aggSig,Update[] memory updates) internal returns (bytes memory data){
         for (uint256 i = 0; i < updates.length; i++) {
             // console.log("b's index", stateL2.usersIndex(updates[i].receipt.bAddress));
             data = abi.encodePacked(
                 data, 
                 uint64(i + 2),
-                updates[i].receipt.amount,
-                updates[i].aSignature,
-                updates[i].bSignature
+                updates[i].receipt.amount
             );
         }
 
-        data = abi.encodePacked(bytes4(keccak256("post()")), uint64(1), uint16(updates.length), data);
+        data = abi.encodePacked(bytes4(keccak256("post()")), aIndex, uint16(updates.length), aggSig[0], aggSig[1], data);
     }
 
-    function optimismL1Cost(bytes memory data) internal returns (uint256 cost){
-        uint256 gasUnits = 0;
-        for (uint256 i = 0; i < data.length; i++) {
-            if (uint8(data[i]) == 0) {
-                gasUnits += 4;
-            }else {
-                gasUnits += 16;
-            }
+    /// `aIndex` in all updates receipts should be same 
+    /// (i.e. a is posting updates)
+    function updateCommitmentBlob(Update[] memory updates) internal returns (bytes memory data){
+        for (uint256 i = 0; i < updates.length; i++) {
+            // console.log("b's index", stateL2.usersIndex(updates[i].receipt.bAddress));
+            data = abi.encodePacked(
+                data, 
+                updates[i].receipt.bIndex,
+                updates[i].receipt.amount,
+                updates[i].receipt.seqNo
+            );
         }
-        cost = (((gasUnits + 2100) * optimismL1GasPrice) * 124 ) / 100;
-
-        console.log("OP l1 gas units raw", gasUnits);
-        // console.log("OP l1 gas cost:", cost, " gwei");
     }
 
-    function test1() public {
-        // registerUsers();
-        // fundAccounts();
+    function receiptBlob(Receipt memory r) internal returns (bytes memory data) {
+        data = abi.encodePacked(r.aIndex, r.bIndex, r.amount, r.expiresBy, r.seqNo);
+    }
 
-        // printBalances();
-        
-        // Update[] memory updates = new Update[](usersAddress.length);
-        // for (uint64 i = 0; i < usersAddress.length; i++) {
-        //     // receipts
-        //     Receipt memory r = Receipt({
-        //         aIndex: 1,
-        //         bIndex: i + 2,
-        //         amount: dummyCharge,
-        //         seqNo: 1,
-        //         expiresBy: stateL2.currentCycleExpiry()
-        //     });
-        //     bytes32 rHash = receiptHash(r);
+    function aggregateSignaturesForPost(uint256[2] memory commitSignature, Update[] memory updates) internal returns (uint256[2] memory aggSig) {
+        uint256[2][] memory signatures = new uint256[2][](updates.length + 1);
+        signatures[0] = commitSignature;
+        for (uint256 i = 0; i < updates.length; i++) {
+            signatures[i + 1] = updates[i].bSignature;
+        }
+
+        aggSig = BlsUtils.aggregateSignatures(signatures);
+    }
+
+    function testPost() public {
+        Update[] memory updates = new Update[](users.length - 1);
+        User memory aUser = users[0];
+        uint32 currentCycleExpiry = stateBls.currentCycleExpiry();
+        for (uint64 i = 1; i < users.length; i++) {
+            // create receipt
+            Receipt memory r = Receipt({
+                aIndex: aUser.index,
+                bIndex: users[i].index,
+                amount: dummyCharge,
+                seqNo: 1,
+                expiresBy: currentCycleExpiry
+            });
+
+            // `b` signs the receipt
+            bytes memory _receiptBlob = receiptBlob(r);
             
-        //     Update memory u = Update ({
-        //         receipt: r,
-        //         aSignature: signMsg(rHash, aPvKey),
-        //         bSignature: signMsg(rHash, usersPvKey[i])
-        //     });
+            
+            Update memory u = Update ({
+                receipt: r,
+                // we don't need `a`'s signature since they the main user rn
+                bSignature:BlsUtils.blsSign(users[i].pvKey, blsDomain, _receiptBlob)
+            });
 
-        //     updates[i] = u;
-        // }
+            updates[i-1] = u;
+        }
+
+        // `a` commits to data
+        bytes memory commitBlob = updateCommitmentBlob(updates);
+        uint256[2] memory aCommitSig = BlsUtils.blsSign(aUser.pvKey, blsDomain, commitBlob);
+
+        // aggregate a's sig on `commitmentData` and all `b`s
+        // signature on their respective receipt that they share
+        // with `a`
+        uint256[2] memory aggSig = aggregateSignaturesForPost(aCommitSig, updates);
+
+        // generate post() calldata
+        bytes memory _calldata = postFnCalldata(aUser.index, aggSig, updates);
+
+        (bool success,) = address(stateBls).call(_calldata);
+        assert(success);
 
         // bytes memory callD = genPostCalldata(updates);
         // // l1 data cost

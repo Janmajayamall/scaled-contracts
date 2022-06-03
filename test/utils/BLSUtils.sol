@@ -25,23 +25,6 @@ library BlsUtils {
         return point;
     }
 
-    function blsPubKey(uint256 secretKey) internal {
-        string[] memory scriptArgs = new string[](5);
-        scriptArgs[0] =  "node";
-        scriptArgs[1] = "./test/hh/scripts/solidity-test.js";
-        scriptArgs[2] = "blsPubKey";
-        scriptArgs[3] = "--secret";
-        bytes memory temp;
-        assembly {
-            mstore(temp, secretKey)
-        }
-        console.logBytes(temp);
-        scriptArgs[4] = string(temp);
-        bytes memory res = vm.ffi(scriptArgs); 
-        console.logBytes(res);
-        // return uint256(bytes32(res));
-    }
-
     function genSecret(string memory length) internal returns (uint256) {
         string[] memory scriptArgs = new string[](5);
         scriptArgs[0] =  "node";
@@ -75,5 +58,23 @@ library BlsUtils {
         // console.log(blsPubKey[1]);
         // console.log(blsPubKey[2]);
         // console.log(blsPubKey[3]);
+    }
+
+    function aggregateSignatures(uint256[2][] memory blsSigs) internal returns (uint256[2] memory aggSig){
+        aggSig[0] = blsSigs[0][0];
+        aggSig[1] = blsSigs[0][1];
+        for (uint256 i = 1; i < blsSigs.length; i++) {
+            uint256[4] memory input;
+            input[0] = aggSig[0];
+            input[1] = aggSig[1];
+            input[2] = blsSigs[i][0];
+            input[3] = blsSigs[i][1];
+            assembly {
+                let success := staticcall(gas(), 6, input, 128, aggSig, 64)
+                if iszero(success) {
+                    invalid()
+                }
+            }
+        }
     }
 }

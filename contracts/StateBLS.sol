@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {BLS} from "./libraries/BLS.sol";
 import "./interfaces/IERC20.sol";
 import "./libraries/Transfers.sol";
-// import "hardhat/console.sol";
+import "./../test/utils/Console.sol";
 
 
 contract StateBLS {
@@ -327,7 +327,7 @@ contract StateBLS {
 
         // verify signatures
         (bool result, bool success) = BLS.verifyMultiple(signature, publicKeys, messages);
-        // console.log(result, success, "Er");
+        console.log(result, success, "Er");
         if (!result || !success){
             revert();
         }
