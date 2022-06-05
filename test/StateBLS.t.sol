@@ -351,7 +351,7 @@ contract StateL2Test is DSTest {
         stateBls.initWithdraw(user.index, withdrawalAmount, sig);
     }
 
-    function testInitWithdrawIncorrectSignature() public {
+    function testFailInitWithdrawIncorrectSignature() public {
         User memory user = createAndRegisterUser();
 
         uint32 nonce = 1; // nonce is correct
@@ -359,5 +359,62 @@ contract StateL2Test is DSTest {
         // notice that we sign on incorrect nonce (i.e. nonce = 0), thus fn call should throw
         uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce - 1, withdrawalAmount));
         stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+    }
+
+    function testProcessWithdrawal() public {
+        User memory user = createAndRegisterUser();
+
+        // fund user
+        uint128 balance = 212912912;
+        fundUser(user, balance);
+
+        // initWithdraw
+        uint32 nonce = 1; // this will be the first withdrawal 
+        uint128 withdrawalAmount = 1411212; // notice that withdrawalAmount < balance
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+
+        // wrap blocktime to `block.timestamp + stateBls.bufferPeriod() + 1`
+        // for withdrawal buffer period to pass
+        vm.warp(block.timestamp + stateBls.bufferPeriod() + 1);
+
+        // process withdrawal
+        uint256 tokenBalanceBefore = token.balanceOf(user.addr);
+        stateBls.processWithdrawal(user.index);
+        uint256 tokenBalanceAfter = token.balanceOf(user.addr);
+        // check that user received amount in `token`
+        assert(tokenBalanceBefore + withdrawalAmount == tokenBalanceAfter);
+
+        // check user's account.balance = balance - withdrawalAmount
+        // & accont.nonce = nonce (i.e. 1)
+        (uint128 accBalance, uint32 accNonce) = stateBls.accounts(user.index);
+        assert(accBalance == balance - withdrawalAmount);
+        assertEq(accNonce, nonce);
+
+        // check pending withdrawal no more exists
+        (uint128 pendingAmount, uint32 validAfter) = stateBls.pendingWithdrawals(user.index);
+        assert(pendingAmount == 0);
+        assert(validAfter == 0);
+    }
+
+    function testFailProcessWithdrawalWithoutInit() public {
+        User memory user = createAndRegisterUser();
+        stateBls.processWithdrawal(user.index);
+    }
+
+    function testFailProcessWithdrawalMoreThanBalance() public {
+        User memory user = createAndRegisterUser();
+        
+        uint128 balance = 212912912;
+        fundUser(user, balance);
+
+        // initWithdraw
+        uint32 nonce = 1; // this will be the first withdrawal 
+        uint128 withdrawalAmount = balance + 1; // withdrawalAmount is greater than balance
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+
+        // process withdrawal
+        stateBls.processWithdrawal(user.index);
     }
 }

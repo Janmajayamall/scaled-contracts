@@ -184,8 +184,14 @@ contract StateBLS {
         Account memory account = accounts[userIndex];
 
         if (
+            account.balance < withdrawal.amount ||
             withdrawal.validAfter >= block.timestamp ||
-            account.balance < withdrawal.amount
+            // It's is necessary to check `validAfter` != 0
+            // to differentiate exisitng from non-exisitng 
+            // `pendingWithdrawals`. In latter case, we revert
+            // to prevent anyone from arbitrarily increasing 
+            // user's (with index = userIndex) account nonce.
+            withdrawal.validAfter == 0
         ){
             revert();
         }
