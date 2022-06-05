@@ -45,25 +45,50 @@ contract StateL2Test is DSTest {
     // Configs
     uint128 fundAmount = 10000 * 10 ** 18;
 
-    // https://public-grafana.optimism.io/d/9hkhMxn7z/public-dashboard?orgId=1&refresh=5m
-    uint256 optimismL1GasPrice = 45;
 
-    function setUsers(uint256 count) internal {
+    /// registers a new user to stateBLS contract
+    function registerUser(User memory user) internal returns (uint64 userIndex) {
+            // sign address
+            bytes memory _msg = abi.encodePacked(user.addr);
+            uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, _msg);
+            stateBls.register(user.addr, user.blsPubKey, sig);  
+
+            // get user's index
+            userIndex =  stateBls.userCount();
+    }
+
+    /// creates and registers a new user
+    function createAndRegisterUser() internal returns (User memory u) {
+        (uint256 pvKey, uint256[4] memory blsPubKey) = BlsUtils.genUser();
+        u = User({
+            pvKey: pvKey,
+            blsPubKey: blsPubKey,
+            addr: vm.addr(pvKey),
+            index: 0
+        });
+
+        // register
+        u.index = registerUser(u);
+    }
+
+    function fundUser(User memory user, uint128 amount) internal {
+        token.transfer(address(stateBls), amount);        
+        stateBls.fundAccount(user.index);
+    }
+
+    /// registers all users in `users`
+    function registerUsers() internal {
+        for (uint256 i = 0; i < users.length; i++) {
+            uint64 userIndex = registerUser(users[i]);
+            users[i].index = userIndex;
+        }
+    }
+
+    /// registers count many new users to `users`
+    function createAndRegisterUsers(uint256 count) internal {
         // users = new User[](0);
         for (uint256 i = 0; i < count; i++) {
-            uint256 pvKey;
-            uint256[4] memory blsPubKey;
-            (pvKey, blsPubKey) = BlsUtils.genUser();
-
-            // console.log(secret, "secret");
-            // BlsUtils.blsPubKey(secret);
-
-            User memory u = User({
-                pvKey: pvKey,
-                blsPubKey: blsPubKey,
-                addr: vm.addr(pvKey),
-                index: 0
-            });
+            User memory u = createAndRegisterUser();
             
             // if user does not exist then push, otherwise replace
             if (users.length <= i) {
@@ -72,8 +97,12 @@ contract StateL2Test is DSTest {
                 users[i] = u;
             }
         }
+    }
 
-        console.log(users.length, "User length");
+    function fundUsers(uint128 amount) internal {
+        for (uint256 i = 0; i < users.length; i++) {
+            fundUser(users[i], amount);
+        }
     }
 
     function receiptHash(Receipt memory receipt) internal view returns (bytes32) {
@@ -89,6 +118,7 @@ contract StateL2Test is DSTest {
             );
     }
 
+
     function printAccountBalances() internal view {
         for (uint i = 0; i < users.length; i++) {
             User memory u = users[i];
@@ -98,29 +128,6 @@ contract StateL2Test is DSTest {
         }
     }
 
-    function registerUsers() internal {
-        for (uint256 i = 0; i < users.length; i++) {
-            // sign address
-            User memory user = users[i];
-            bytes memory _msg = abi.encodePacked(user.addr);
-            uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, _msg);
-            stateBls.register(user.addr, user.blsPubKey, sig);  
-
-            // get user's index
-            users[i].index = stateBls.userCount();
-        }
-    }
-
-    function fundUser(User memory user, uint128 amount) internal {
-        token.transfer(address(stateBls), amount);        
-        stateBls.fundAccount(user.index);
-    }
-
-    function fundUsers(uint128 amount) internal {
-        for (uint256 i = 0; i < users.length; i++) {
-            fundUser(users[i], amount);
-        }
-    }
     
     /// Returns calldata for `post()` fn. All receipts
     /// should have `receipt.aIndex` set as `aIndex`.
@@ -178,10 +185,11 @@ contract StateL2Test is DSTest {
         stateBls = new StateBLS(address(token));
     }
 
-    function testPost(uint128[11] memory balances, uint128[11] memory amounts) public {
+    // throghout this test we think that `a` is `users[0]`
+    function teswwtPost(uint128[11] memory balances, uint128[11] memory amounts) public {
         uint256 usersCount = 11;
 
-        setUsers(usersCount);
+        createAndRegisterUsers(usersCount);
         registerUsers();
 
         // fund users
@@ -192,8 +200,6 @@ contract StateL2Test is DSTest {
             }
         }
 
-        // printAccountBalances();
-
         Update[] memory updates = new Update[](users.length - 1);
         User memory aUser = users[0];
         uint32 currentCycleExpiry = stateBls.currentCycleExpiry();
@@ -201,6 +207,7 @@ contract StateL2Test is DSTest {
         uint256 totalAmount; // totalAmount that `a` receives - should not exceed uint128 
 
         for (uint64 i = 1; i < users.length; i++) {
+            // amount = amounts[i] % balances[i]
             uint128 amount;
             if (balances[i] != 0){
                 amount = amounts[i] % balances[i];
@@ -231,8 +238,6 @@ contract StateL2Test is DSTest {
 
         // if totalAmount > uint128.max then discard
         vm.assume(totalAmount <= type(uint128).max);
-        vm.assume(totalAmount <= uint256(340282366920938463463374607431768211455));
-        console.log(totalAmount, " total Amount");
 
         // `a` commits to data
         bytes memory commitBlob = updateCommitmentBlob(updates);
@@ -245,9 +250,23 @@ contract StateL2Test is DSTest {
 
         // generate post() calldata
         bytes memory _calldata = postFnCalldata(aUser.index, aggSig, updates);
-        // console.log
+        
         (bool success,) = address(stateBls).call(_calldata);
         assert(success);
+
+        // check that a's balance is equal `totalAmount`
+        // and other users balance is equal to `balances[i] - (updates[i-1].receipt.amount)`
+        for (uint256 i = 0; i < users.length; i++) {
+            uint128 expectedBalance;
+            if (i == 0){
+                expectedBalance = uint128(totalAmount);
+            }else {
+                expectedBalance = balances[i] - updates[i-1].receipt.amount;
+            }
+
+            (uint128 balance, ) = stateBls.accounts(users[i].index);
+            assert(balance == expectedBalance);
+        }
 
         // printAccountBalances();
 
@@ -269,6 +288,28 @@ contract StateL2Test is DSTest {
         // assert(success);
 
         // printBalances();
+    }
+
+    function testInitWithdraw() public {
+        // create new user
+        User memory user = createAndRegisterUser();
+
+        // fund user account
+        uint128 amount = 12891831921;
+        fundUser(user, amount);
+
+        // Since this is user's first withdrawal
+        // their exisitng account nonce should be 0.
+        // To initWithdraw we sigh exisitng nonce + 1.
+        uint32 nonce = 1;
+        uint128 withdrawalAmount = 121312121;
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+
+        // check pending withdrawl
+        (uint128 pendingAmount, uint32 validAfter) = stateBls.pendingWithdrawals(user.index);
+        assert(pendingAmount == withdrawalAmount);
+        assert(validAfter == block.timestamp + stateBls.bufferPeriod());
     }
 
 }
