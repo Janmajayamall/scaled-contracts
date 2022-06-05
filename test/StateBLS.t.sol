@@ -185,7 +185,7 @@ contract StateL2Test is DSTest {
         stateBls = new StateBLS(address(token));
     }
 
-    // throghout this test we think that `a` is `users[0]`
+    /// throghout this test we think that `a` is `users[0]`
     function teswwtPost(uint128[11] memory balances, uint128[11] memory amounts) public {
         uint256 usersCount = 11;
 
@@ -294,10 +294,6 @@ contract StateL2Test is DSTest {
         // create new user
         User memory user = createAndRegisterUser();
 
-        // fund user account
-        uint128 amount = 12891831921;
-        fundUser(user, amount);
-
         // Since this is user's first withdrawal
         // their exisitng account nonce should be 0.
         // To initWithdraw we sigh exisitng nonce + 1.
@@ -310,6 +306,58 @@ contract StateL2Test is DSTest {
         (uint128 pendingAmount, uint32 validAfter) = stateBls.pendingWithdrawals(user.index);
         assert(pendingAmount == withdrawalAmount);
         assert(validAfter == block.timestamp + stateBls.bufferPeriod());
+
+        // check user's account nonce is still 0
+        (, nonce) = stateBls.accounts(user.index);
+        assert(nonce == 0);
     }
 
+    function testInitWithdrawOverrideWithCorrectNonce() public {
+        // create new user
+        User memory user = createAndRegisterUser();
+
+        // 1st initWithdraw
+        uint32 nonce = 1;
+        uint128 withdrawalAmount = 21212121;
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+
+        // change blocktimestamp
+        vm.warp(10);
+
+        // 2nd initWithdraw
+        withdrawalAmount = 1213;
+        sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+
+        // check pending withdrawal equal to details of 2nd withdrawl
+        (uint128 pendingAmount, uint32 validAfter) = stateBls.pendingWithdrawals(user.index);
+        assert(pendingAmount == withdrawalAmount);
+        assert(validAfter == block.timestamp + stateBls.bufferPeriod());
+    }
+
+    function testFailInitWithdrawIncorrectNonce() public {
+        // create new user
+        User memory user = createAndRegisterUser();
+
+        // Since this is user's first withdrawal
+        // their exisitng account nonce should be 0 
+        // and `initWithdraw` should be called with
+        // nonce = 1. By setting nonce = 2, we set 
+        // an incorrect nonce for which fn should throw
+        uint32 nonce = 2;
+        uint128 withdrawalAmount = 121312121;
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+    }
+
+    function testInitWithdrawIncorrectSignature() public {
+        User memory user = createAndRegisterUser();
+
+        uint32 nonce = 1; // nonce is correct
+        uint128 withdrawalAmount = 121312121;
+        // notice that we sign on incorrect nonce (i.e. nonce = 0), thus fn call should throw
+        uint256[2] memory sig = BlsUtils.blsSign(user.pvKey, blsDomain, abi.encodePacked(nonce - 1, withdrawalAmount));
+        stateBls.initWithdraw(user.index, withdrawalAmount, sig);
+    }
 }
