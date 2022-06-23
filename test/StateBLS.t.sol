@@ -7,7 +7,7 @@ import "./../contracts/StateL2.sol";
 import "./../contracts/StateBLS.sol";
 import "./TestToken.sol";
 import "./utils/Console.sol";
-import {BlsUtils} from "./utils/BlsUtils.sol";
+import {BlsUtils} from "./utils/BLSUtils.sol";
 import {BLS} from "./../contracts/libraries/BLS.sol";
 import {Vm} from "./utils/Vm.sol";
 

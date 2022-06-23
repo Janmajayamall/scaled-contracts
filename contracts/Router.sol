@@ -12,6 +12,12 @@ contract Router {
 
     address public stateBls;
 
+    constructor(
+        address stateBls_
+    ) {
+        stateBls = stateBls_;
+    }
+
     function fundAccount(uint64 toIndex, uint128 amount) external {
         address _stateBls = stateBls;
         if (_stateBls == address(0)){
